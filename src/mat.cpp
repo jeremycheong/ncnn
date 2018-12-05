@@ -17,8 +17,12 @@
 #if __ARM_NEON
 #include <arm_neon.h>
 #endif // __ARM_NEON
+#include <math.h>
 
 #include "cpu.h"
+
+#include "layer_type.h"
+#include "layer.h"
 
 namespace ncnn {
 
@@ -353,188 +357,27 @@ Mat Mat::from_float16(const unsigned short* data, int size)
     return m;
 }
 
-static void copy_make_border_image(const Mat& src, Mat& dst, int top, int left, int type, float v)
+void copy_make_border(const Mat& src, Mat& dst, int top, int bottom, int left, int right, int type, float v, Allocator* allocator, int num_threads)
 {
-    int w = dst.w;
-    int h = dst.h;
+    ncnn::Layer* padding = ncnn::create_layer(ncnn::LayerType::Padding);
 
-    const float* ptr = src;//.data;
-    float* outptr = dst;//.data;
+    ncnn::ParamDict pd;
+    pd.set(0, top);
+    pd.set(1, bottom);
+    pd.set(2, left);
+    pd.set(3, right);
+    pd.set(4, type);
+    pd.set(5, v);
 
-    if (type == BORDER_CONSTANT)
-    {
-        int y = 0;
-        // fill top
-        for (; y < top; y++)
-        {
-            int x = 0;
-            for (; x < w; x++)
-            {
-                outptr[x] = v;
-            }
-            outptr += w;
-        }
-        // fill center
-        for (; y < (top + src.h); y++)
-        {
-            int x = 0;
-            for (; x < left; x++)
-            {
-                outptr[x] = v;
-            }
-            if (src.w < 12)
-            {
-                for (; x < (left + src.w); x++)
-                {
-                    outptr[x] = ptr[x - left];
-                }
-            }
-            else
-            {
-                memcpy(outptr + left, ptr, src.w * sizeof(float));
-                x += src.w;
-            }
-            for (; x < w; x++)
-            {
-                outptr[x] = v;
-            }
-            ptr += src.w;
-            outptr += w;
-        }
-        // fill bottom
-        for (; y < h; y++)
-        {
-            int x = 0;
-            for (; x < w; x++)
-            {
-                outptr[x] = v;
-            }
-            outptr += w;
-        }
-    }
-    else if (type == BORDER_REPLICATE)
-    {
-        int y = 0;
-        // fill top
-        for (; y < top; y++)
-        {
-            int x = 0;
-            for (; x < left; x++)
-            {
-                outptr[x] = ptr[0];
-            }
-            if(src.w < 12)
-            {
-                for (; x < (left + src.w); x++)
-                {
-                    outptr[x] = ptr[x - left];
-                }
-            }
-            else
-            {
-                memcpy(outptr + left, ptr, src.w * sizeof(float));
-                x += src.w;
-            }
-            for (; x < w; x++)
-            {
-                outptr[x] = ptr[src.w - 1];
-            }
-            outptr += w;
-        }
-        // fill center
-        for (; y < (top + src.h); y++)
-        {
-            int x = 0;
-            for (; x < left; x++)
-            {
-                outptr[x] = ptr[0];
-            }
-            if(src.w < 12)
-            {
-                for (; x < (left + src.w); x++)
-                {
-                    outptr[x] = ptr[x - left];
-                }
-            }
-            else
-            {
-                memcpy(outptr + left, ptr, src.w * sizeof(float));
-                x += src.w;
-            }
-            for (; x < w; x++)
-            {
-                outptr[x] = ptr[src.w - 1];
-            }
-            ptr += src.w;
-            outptr += w;
-        }
-        // fill bottom
-        ptr -= src.w;
-        for (; y < h; y++)
-        {
-            int x = 0;
-            for (; x < left; x++)
-            {
-                outptr[x] = ptr[0];
-            }
-            if(src.w < 12)
-            {
-                for (; x < (left + src.w); x++)
-                {
-                    outptr[x] = ptr[x - left];
-                }
-            }
-            else
-            {
-                memcpy(outptr + left, ptr, src.w * sizeof(float));
-                x += src.w;
-            }
-            for (; x < w; x++)
-            {
-                outptr[x] = ptr[src.w - 1];
-            }
-            outptr += w;
-        }
-    }
-}
+    padding->load_param(pd);
 
-void copy_make_border(const Mat& src, Mat& dst, int top, int bottom, int left, int right, int type, float v)
-{
-    int w = src.w + left + right;
-    int h = src.h + top + bottom;
+    ncnn::Option opt = ncnn::get_default_option();
+    opt.num_threads = num_threads;
+    opt.blob_allocator = allocator;
 
-    if (w == src.w && h == src.h)
-    {
-        dst = src;
-        return;
-    }
+    padding->forward(src, dst, opt);
 
-    if (src.dims == 2)
-    {
-        dst.create(w, h);
-        if (dst.empty())
-            return;
-
-        copy_make_border_image(src, dst, top, left, type, v);
-    }
-    else if (src.dims == 3)
-    {
-        int channels = src.c;
-
-        dst.create(w, h, channels);
-        if (dst.empty())
-            return;
-
-        // unroll image channel
-        #pragma omp parallel for
-        for (int q=0; q<channels; q++)
-        {
-            const Mat m = src.channel(q);
-            Mat borderm = dst.channel(q);
-
-            copy_make_border_image(m, borderm, top, left, type, v);
-        }
-    }
+    delete padding;
 }
 
 static void copy_cut_border_image(const Mat& src, Mat& dst, int top, int left)
@@ -563,10 +406,11 @@ static void copy_cut_border_image(const Mat& src, Mat& dst, int top, int left)
     }
 }
 
-void copy_cut_border(const Mat& src, Mat& dst, int top, int bottom, int left, int right)
+void copy_cut_border(const Mat& src, Mat& dst, int top, int bottom, int left, int right, Allocator* allocator, int num_threads)
 {
     int w = src.w - left - right;
     int h = src.h - top - bottom;
+    size_t elemsize = src.elemsize;
 
     if (w == src.w && h == src.h)
     {
@@ -576,7 +420,7 @@ void copy_cut_border(const Mat& src, Mat& dst, int top, int bottom, int left, in
 
     if (src.dims == 2)
     {
-        dst.create(w, h);
+        dst.create(w, h, elemsize, allocator);
         if (dst.empty())
             return;
 
@@ -586,12 +430,12 @@ void copy_cut_border(const Mat& src, Mat& dst, int top, int bottom, int left, in
     {
         int channels = src.c;
 
-        dst.create(w, h, channels);
+        dst.create(w, h, channels, elemsize, allocator);
         if (dst.empty())
             return;
 
         // unroll image channel
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(num_threads)
         for (int q=0; q<channels; q++)
         {
             const Mat m = src.channel(q);
@@ -623,10 +467,15 @@ static void resize_bilinear_image(const Mat& src, Mat& dst, int w, int h)
     for (int dx = 0; dx < w; dx++)
     {
         fx = (float)((dx + 0.5) * scale_x - 0.5);
-        sx = fx;//cvFloor(fx);
+        sx = floor(fx);
         fx -= sx;
 
-        if( sx >= src.w-1 )
+        if (sx < 0)
+        {
+            sx = 0;
+            fx = 0.f;
+        }
+        if (sx >= src.w - 1)
         {
             sx = src.w - 2;
             fx = 1.f;
@@ -641,9 +490,14 @@ static void resize_bilinear_image(const Mat& src, Mat& dst, int w, int h)
     for (int dy = 0; dy < h; dy++)
     {
         fy = (float)((dy + 0.5) * scale_y - 0.5);
-        sy = fy;//cvFloor(fy);
+        sy = floor(fy);
         fy -= sy;
 
+        if (sy < 0)
+        {
+            sy = 0;
+            fy = 0.f;
+        }
         if (sy >= src.h - 1)
         {
             sy = src.h - 2;
@@ -821,7 +675,7 @@ static void resize_bilinear_image(const Mat& src, Mat& dst, int w, int h)
     delete[] buf;
 }
 
-void resize_bilinear(const Mat& src, Mat& dst, int w, int h)
+void resize_bilinear(const Mat& src, Mat& dst, int w, int h, Allocator* allocator, int num_threads)
 {
     if (w == src.w && h == src.h)
     {
@@ -829,9 +683,11 @@ void resize_bilinear(const Mat& src, Mat& dst, int w, int h)
         return;
     }
 
+    size_t elemsize = src.elemsize;
+
     if (src.dims == 2)
     {
-        dst.create(w, h);
+        dst.create(w, h, elemsize, allocator);
         if (dst.empty())
             return;
 
@@ -841,12 +697,12 @@ void resize_bilinear(const Mat& src, Mat& dst, int w, int h)
     {
         int channels = src.c;
 
-        dst.create(w, h, channels);
+        dst.create(w, h, channels, elemsize, allocator);
         if (dst.empty())
             return;
 
         // unroll image channel
-        #pragma omp parallel for
+        #pragma omp parallel for num_threads(num_threads)
         for (int q=0; q<channels; q++)
         {
             const Mat m = src.channel(q);

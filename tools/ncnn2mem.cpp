@@ -102,9 +102,8 @@ static int dump_param(const char* parampath, const char* parambinpath, const cha
     layer_names.resize(layer_count);
     blob_names.resize(blob_count);
 
-    int layer_index = 0;
     int blob_index = 0;
-    while (!feof(fp))
+    for (int i=0; i<layer_count; i++)
     {
         int nscan = 0;
 
@@ -126,7 +125,7 @@ static int dump_param(const char* parampath, const char* parambinpath, const cha
         fwrite(&bottom_count, sizeof(int), 1, mp);
         fwrite(&top_count, sizeof(int), 1, mp);
 
-        fprintf(ip, "const int LAYER_%s = %d;\n", layer_name, layer_index);
+        fprintf(ip, "const int LAYER_%s = %d;\n", layer_name, i);
 
 //         layer->bottoms.resize(bottom_count);
         for (int i=0; i<bottom_count; i++)
@@ -227,9 +226,7 @@ static int dump_param(const char* parampath, const char* parambinpath, const cha
         int EOP = -233;
         fwrite(&EOP, sizeof(int), 1, mp);
 
-        layer_names[layer_index] = std::string(layer_name);
-
-        layer_index++;
+        layer_names[i] = std::string(layer_name);
     }
 
     fprintf(ip, "} // namespace %s_id\n", param_var.c_str());

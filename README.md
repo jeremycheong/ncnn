@@ -1,12 +1,35 @@
+![](https://raw.githubusercontent.com/Tencent/ncnn/master/images/256-ncnn.png)
 # ncnn
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](https://raw.githubusercontent.com/Tencent/ncnn/master/LICENSE.txt) 
 [![Build Status](https://travis-ci.org/Tencent/ncnn.svg?branch=master)](https://travis-ci.org/Tencent/ncnn)
+[![Coverage Status](https://coveralls.io/repos/github/Tencent/ncnn/badge.svg?branch=master)](https://coveralls.io/github/Tencent/ncnn?branch=master)
 
 
-ncnn is a high-performance neural network inference computing framework optimized for mobile platforms. ncnn is deeply considerate about deployment and uses on mobile phones from the beginning of design. ncnn does not have third party dependencies, it is cross-platform, and runs faster than all known open source frameworks on mobile phone cpu. Developers can easily deploy deep learning algorithm models to the mobile platform by using efficient ncnn implementation, create intelligent APPs, and bring the artificial intelligence to your fingertips. ncnn is currently being used in many Tencent applications, such as QQ, Qzone, WeChat, Pitu and so on.
+ncnn is a high-performance neural network inference computing framework optimized for mobile platforms. ncnn is deeply considerate about deployment and uses on mobile phones from the beginning of design. ncnn does not have third party dependencies. it is cross-platform, and runs faster than all known open source frameworks on mobile phone cpu. Developers can easily deploy deep learning algorithm models to the mobile platform by using efficient ncnn implementation, create intelligent APPs, and bring the artificial intelligence to your fingertips. ncnn is currently being used in many Tencent applications, such as QQ, Qzone, WeChat, Pitu and so on.
 
 ncnn 是一个为手机端极致优化的高性能神经网络前向计算框架。ncnn 从设计之初深刻考虑手机端的部署和使用。无第三方依赖，跨平台，手机端 cpu 的速度快于目前所有已知的开源框架。基于 ncnn，开发者能够将深度学习算法轻松移植到手机端高效执行，开发出人工智能 APP，将 AI 带到你的指尖。ncnn 目前已在腾讯多款应用中使用，如 QQ，Qzone，微信，天天P图等。
+
+---
+
+### Support most commonly used CNN network
+### 支持大部分常用的 CNN 网络
+
+Classical CNN Network: VGG AlexNet GoogleNet Inception ...
+
+Practical CNN Network: ResNet DenseNet SENet FPN ...
+
+Light-weight CNN Network: SqueezeNet MobileNetV1/V2 ShuffleNetV1/V2 MNasNet ...
+
+Detection Network: MTCNN facedetection ...
+
+Detection Network: VGG-SSD MobileNet-SSD SqueezeNet-SSD MobileNetV2-SSDLite ...
+
+Detection Network: Faster-RCNN R-FCN ...
+
+Detection Network: YOLOV2 YOLOV3 MobileNet-YOLOV3 ...
+
+Segmentation Network: FCN PSPNet ...
 
 ---
 
@@ -30,13 +53,15 @@ ncnn 是一个为手机端极致优化的高性能神经网络前向计算框架
 
 ### FAQ
 
+[ncnn throw error](https://github.com/Tencent/ncnn/wiki/FAQ-ncnn-throw-error)
+
 [ncnn produce wrong result](https://github.com/Tencent/ncnn/wiki/FAQ-ncnn-produce-wrong-result)
 
 ---
 
 ### Features
 
-* Supports convolution neural networks, supports multiple input and multi-branch structure, can calculate part of the branch
+* Supports convolutional neural networks, supports multiple input and multi-branch structure, can calculate part of the branch
 * No third-party library dependencies, does not rely on BLAS / NNPACK or any other computing framework
 * Pure C ++ implementation, cross-platform, supports android, ios and so on
 * ARM NEON assembly level of careful optimization, calculation speed is extremely high
@@ -68,7 +93,7 @@ ncnn 是一个为手机端极致优化的高性能神经网络前向计算框架
 
 https://github.com/Tencent/ncnn/tree/master/examples/squeezencnn
 
-### 技术交流QQ群：637093648  答案：卷卷卷卷卷
+### 技术交流QQ群：637093648(已满qaq) 853969140  答案：卷卷卷卷卷
 
 ---
 

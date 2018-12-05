@@ -497,6 +497,10 @@ int main(int argc, char** argv)
             fprintf(pp, "%-16s", "Dropout");
             output_size = 1;
         }
+        else if (op == "Elu")
+        {
+            fprintf(pp, "%-16s", "ELU");
+        }
         else if (op == "Gemm")
         {
             float alpha = get_node_attr_f(node, "alpha", 1.f);
@@ -547,6 +551,14 @@ int main(int argc, char** argv)
         else if (op == "Mul")
         {
             fprintf(pp, "%-16s", "BinaryOp");
+        }
+        else if (op == "Pad")
+        {
+            fprintf(pp, "%-16s", "Padding");
+        }
+        else if (op == "PRelu")
+        {
+            fprintf(pp, "%-16s", "PReLU");
         }
         else if (op == "Relu")
         {
@@ -811,7 +823,7 @@ int main(int argc, char** argv)
         {
             const onnx::TensorProto& W = weights[node.input(1)];
 
-            int num_filter = W.dims(0);
+            int num_filter = W.dims(1);
             int has_bias = node.input_size() == 3 ? 1 : 0;
 
             std::string auto_pad = get_node_attr_s(node, "auto_pad");//TODO
@@ -878,7 +890,39 @@ int main(int argc, char** argv)
             int quantize_tag = 0;
             fwrite(&quantize_tag, sizeof(int), 1, bp);
 
-            fwrite_tensor_proto_data(W, bp);
+            int maxk = 0;
+            if (kernel_shape.size() == 2)
+            {
+                maxk = kernel_shape[1] * kernel_shape[0];
+            }
+            else
+            {
+                maxk = kernel_shape[0] * kernel_shape[0];
+            }
+            int weight_data_size = get_tensor_proto_data_size(W);
+            const float* weight_data = 0;
+            if (W.has_raw_data())
+            {
+                weight_data = (const float*)W.raw_data().data();
+            }
+            else if (W.data_type() == 1)
+            {
+                weight_data = W.float_data().data();
+            }
+            for (int g=0; g<group; g++)
+            {
+            // reorder weight from inch-outch to outch-inch
+            int num_filter_g = num_filter / group;
+            int num_input = weight_data_size / maxk / num_filter_g / group;
+            const float* weight_data_ptr = weight_data + g * maxk * num_filter_g * num_input;
+            for (int k=0; k<num_filter_g; k++)
+            {
+                for (int j=0; j<num_input; j++)
+                {
+                    fwrite(weight_data_ptr + (j*num_filter_g + k) * maxk, sizeof(float), maxk, bp);
+                }
+            }
+            }
 
             if (has_bias)
             {
@@ -889,6 +933,11 @@ int main(int argc, char** argv)
         else if (op == "Dropout")
         {
             // no-op
+        }
+        else if (op == "Elu")
+        {
+            float alpha = get_node_attr_f(node, "alpha", 1.f);
+            fprintf(pp, " 0=%f", alpha);
         }
         else if (op == "Gemm")
         {
@@ -1019,6 +1068,48 @@ int main(int argc, char** argv)
         {
             int op_type = 2;
             fprintf(pp, " 0=%d", op_type);
+        }
+        else if (op == "Pad")
+        {
+            std::string mode = get_node_attr_s(node, "mode");
+            std::vector<int> pads = get_node_attr_ai(node, "pads");
+            float value = get_node_attr_f(node, "value", 0.f);
+
+            int type = 0;
+            if (mode == "constant")
+            {
+                type = 0;
+            }
+            else if (mode == "edge")
+            {
+                type = 1;
+            }
+            else if (mode == "reflect")
+            {
+                // FIXME
+            }
+
+            int top = pads[0];
+            int bottom = pads[2];
+            int left = pads[1];
+            int right = pads[3];
+
+            fprintf(pp, " 0=%d", top);
+            fprintf(pp, " 1=%d", bottom);
+            fprintf(pp, " 2=%d", left);
+            fprintf(pp, " 3=%d", right);
+            fprintf(pp, " 4=%d", type);
+            fprintf(pp, " 5=%f", value);
+        }
+        else if (op == "PRelu")
+        {
+            const onnx::TensorProto& slope = weights[node.input(1)];
+
+            int num_slope = get_tensor_proto_data_size(slope);
+
+            fprintf(pp, " 0=%d", num_slope);
+
+            fwrite_tensor_proto_data(slope, bp);
         }
         else if (op == "Reshape")
         {
