@@ -29,7 +29,7 @@ namespace ncnn {
 class Command
 {
 public:
-    Command(VulkanDevice* vkdev, uint32_t queue_index);
+    Command(const VulkanDevice* vkdev, uint32_t queue_index);
     ~Command();
 
 protected:
@@ -43,7 +43,7 @@ protected:
     int wait_fence();
 
 protected:
-    VulkanDevice* vkdev;
+    const VulkanDevice* vkdev;
     uint32_t queue_index;
 
     VkQueue queue;
@@ -57,7 +57,7 @@ protected:
 class VkCompute : public Command
 {
 public:
-    VkCompute(VulkanDevice* vkdev);
+    VkCompute(const VulkanDevice* vkdev);
     ~VkCompute();
 
     void record_upload(const VkMat& m);
@@ -70,23 +70,13 @@ public:
 
     void record_copy_regions(const VkMat& src, const VkMat& dst, const std::vector<VkBufferCopy>& regions);
 
-    void record_transfer_compute_barrier(const VkMat& m);
-
-    void record_compute_transfer_barrier(const VkMat& m);
-
-    void record_compute_compute_barrier(const VkMat& m);
-
-    void record_transfer_transfer_barrier(const VkMat& m);
-
-    void record_prepare_transfer_barrier(const VkMat& m);
-
-    void record_prepare_compute_barrier(const VkMat& m);
-
     void record_pipeline(const Pipeline* pipeline, const std::vector<VkMat>& bindings, const std::vector<vk_constant_type>& constants, const VkMat& m);
 
     int submit();
 
     int wait();
+
+    int reset();
 
 protected:
     // record pipeline things
@@ -94,6 +84,16 @@ protected:
     void record_update_bindings(VkPipelineLayout pipeline_layout, VkDescriptorSetLayout descriptorset_layout, VkDescriptorUpdateTemplateKHR descriptor_update_template, const std::vector<VkMat>& bindings);
     void record_push_constants(VkPipelineLayout pipeline_layout, const std::vector<vk_constant_type>& constants);
     void record_dispatch(const uint32_t* group_count_xyz);
+
+    // record barrier things
+    void record_transfer_compute_barrier(const VkMat& m);
+    void record_compute_transfer_barrier(const VkMat& m);
+    void record_compute_compute_barrier(const VkMat& m);
+    void record_transfer_transfer_barrier(const VkMat& m);
+
+    // record prepare things
+    void record_prepare_transfer_barrier(const VkMat& m);
+    void record_prepare_compute_barrier(const VkMat& m);
 
 protected:
     // recording issue
@@ -151,12 +151,10 @@ protected:
 class VkTransfer : public Command
 {
 public:
-    VkTransfer(VulkanDevice* vkdev);
+    VkTransfer(const VulkanDevice* vkdev);
     ~VkTransfer();
 
     void record_upload(const Mat& src, VkMat& dst);
-
-    void record_download(const VkMat& src, Mat& dst);
 
     int submit();
 
@@ -178,9 +176,6 @@ protected:
     // delayed record
     struct record_type
     {
-        // 0=upload
-        // 1=download
-        int type;
         size_t size;
         Mat mat;
         VkMat vkmat;
