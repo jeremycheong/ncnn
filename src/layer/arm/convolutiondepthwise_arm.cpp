@@ -13,11 +13,12 @@
 // specific language governing permissions and limitations under the License.
 
 #include "convolutiondepthwise_arm.h"
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #include "layer_type.h"
+
+#if __ARM_NEON
+#include <arm_neon.h>
+#endif // __ARM_NEON
 
 namespace ncnn {
 
@@ -30,21 +31,50 @@ DEFINE_LAYER_CREATOR(ConvolutionDepthWise_arm)
 
 ConvolutionDepthWise_arm::ConvolutionDepthWise_arm()
 {
+    activation = 0;
 }
 
-ConvolutionDepthWise_arm::~ConvolutionDepthWise_arm()
+int ConvolutionDepthWise_arm::create_pipeline(const Option& opt)
 {
-    for (int i=0; i<(int)group_ops.size(); i++)
-        delete group_ops[i];
+    Option opt_cpu = opt;
+    opt_cpu.use_vulkan_compute = false;
 
-    group_ops.clear();
-}
+    if (activation_type == 1)
+    {
+        activation = ncnn::create_layer(ncnn::LayerType::ReLU);
 
-int ConvolutionDepthWise_arm::load_model(const ModelBin& mb)
-{
-    int ret = ConvolutionDepthWise::load_model(mb);
-    if (ret != 0)
-        return ret;
+        ncnn::ParamDict pd;
+        activation->load_param(pd);
+    }
+    else if (activation_type == 2)
+    {
+        activation = ncnn::create_layer(ncnn::LayerType::ReLU);
+
+        ncnn::ParamDict pd;
+        pd.set(0, activation_params[0]);// slope
+        activation->load_param(pd);
+    }
+    else if (activation_type == 3)
+    {
+        activation = ncnn::create_layer(ncnn::LayerType::Clip);
+
+        ncnn::ParamDict pd;
+        pd.set(0, activation_params[0]);// min
+        pd.set(1, activation_params[1]);// max
+        activation->load_param(pd);
+    }
+    else if (activation_type == 4)
+    {
+        activation = ncnn::create_layer(ncnn::LayerType::Sigmoid);
+
+        ncnn::ParamDict pd;
+        activation->load_param(pd);
+    }
+
+    if (activation)
+    {
+        activation->create_pipeline(opt_cpu);
+    }
 
     // create Convolution op for each group
     const int maxk = kernel_w * kernel_h;
@@ -115,7 +145,7 @@ int ConvolutionDepthWise_arm::load_model(const ModelBin& mb)
             if (int8_scale_term)
             {
                 weights[2] = weight_data_int8_scales.range(g, 1);
-                weights[3] = bottom_blob_int8_scales.range(g, 1);     
+                weights[3] = bottom_blob_int8_scales.range(g, 1);
             }
 
             op->load_model(ModelBinFromMatArray(weights));
@@ -128,14 +158,38 @@ int ConvolutionDepthWise_arm::load_model(const ModelBin& mb)
             if (int8_scale_term)
             {
                 weights[1] = weight_data_int8_scales.range(g, 1);
-                weights[2] = bottom_blob_int8_scales.range(g, 1);     
+                weights[2] = bottom_blob_int8_scales.range(g, 1);
             }
 
             op->load_model(ModelBinFromMatArray(weights));
         }
 
+        op->create_pipeline(opt_cpu);
+
         group_ops[g] = op;
     }
+
+    return 0;
+}
+
+int ConvolutionDepthWise_arm::destroy_pipeline(const Option& opt)
+{
+    Option opt_cpu = opt;
+    opt_cpu.use_vulkan_compute = false;
+
+    if (activation)
+    {
+        activation->destroy_pipeline(opt_cpu);
+        delete activation;
+        activation = 0;
+    }
+
+    for (int i=0; i<(int)group_ops.size(); i++)
+    {
+        group_ops[i]->destroy_pipeline(opt_cpu);
+        delete group_ops[i];
+    }
+    group_ops.clear();
 
     return 0;
 }
@@ -222,7 +276,7 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob, con
             top_blob_tm.create(outw, outh, num_output, (size_t)4u, opt.workspace_allocator);
             if (top_blob_tm.empty())
                 return -100;
-            
+  
             top_blob.create(outw, outh, num_output, (size_t)1u, opt.blob_allocator);
             if (top_blob.empty())
                 return -100;
@@ -233,28 +287,15 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob, con
                 if (kernel_w == 3 && kernel_h == 3 && dilation_w == 1 && dilation_h == 1)
                 {
                     if ((stride_w == 1 && stride_h == 1) || (stride_w == 2 && stride_h == 2))
-                    {
+                    {                  
                         if (stride_w == 1 && stride_h == 1)
                         {
-                            convdw3x3s1_int8_neon(bottom_blob_bordered, top_blob_tm, weight_data, opt);
+                            convdw3x3s1_int8_requant_neon(bottom_blob_bordered, top_blob, weight_data, bias_data, requantize_scales, opt);
                         }
                         else if (stride_w == 2 && stride_h == 2)
                         {
-                            convdw3x3s2_int8_neon(bottom_blob_bordered, top_blob_tm, weight_data, opt);
-                        }
-
-                        // requantize, reverse scale inplace
-                        #pragma omp parallel for num_threads(opt.num_threads)
-                        for (int g=0; g<group; g++)
-                        {
-                            ncnn::Option opt_g = opt;
-                            opt_g.num_threads = 1;
-                            opt_g.blob_allocator = top_blob.allocator;
-
-                            Mat top_blob_tm_g = top_blob_tm.channel_range(g, 1);
-                            Mat top_blob_g = top_blob.channel_range(g, 1);
-                            requantize_ops[g]->forward(top_blob_tm_g, top_blob_g, opt_g);
-                        }
+                            convdw3x3s2_int8_requant_neon(bottom_blob_bordered, top_blob, weight_data, bias_data, requantize_scales, opt);
+                        }                   
 
                         return 0;
                     }
@@ -301,7 +342,7 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob, con
         {
             top_blob.create(outw, outh, num_output, (size_t)4u, opt.blob_allocator);
             if (top_blob.empty())
-                return -100;
+                return -100;               
 
             // depth-wise
             if (channels == group && group == num_output)
@@ -329,7 +370,7 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob, con
 
                             Mat top_blob_g = top_blob.channel(g);
                             dequantize_ops[g]->forward_inplace(top_blob_g, opt_g);
-                        } 
+                        }
 
                         return 0;
                     }
@@ -389,26 +430,36 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob, con
             if (stride_w == 1 && stride_h == 1)
             {
                 convdw3x3s1_neon(bottom_blob_bordered, top_blob, weight_data, bias_data, opt);
-                return 0;
             }
             else if (stride_w == 2 && stride_h == 2)
             {
                 convdw3x3s2_neon(bottom_blob_bordered, top_blob, weight_data, bias_data, opt);
-                return 0;
             }
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
         }
         if (kernel_w == 5 && kernel_h == 5 && dilation_w == 1 && dilation_h == 1)
         {
             if (stride_w == 1 && stride_h == 1)
             {
                 convdw5x5s1_neon(bottom_blob_bordered, top_blob, weight_data, bias_data, opt);
-                return 0;
             }
             else if (stride_w == 2 && stride_h == 2)
             {
                 convdw5x5s2_neon(bottom_blob_bordered, top_blob, weight_data, bias_data, opt);
-                return 0;
             }
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
         }        
 
         #pragma omp parallel for num_threads(opt.num_threads)
@@ -426,6 +477,11 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob, con
             // forward
             op->forward(bottom_blob_bordered_g, top_blob_g, opt_g);
         }            
+
+        if (activation)
+        {
+            activation->forward_inplace(top_blob, opt);
+        }
 
         return 0;
     }
@@ -445,6 +501,11 @@ int ConvolutionDepthWise_arm::forward(const Mat& bottom_blob, Mat& top_blob, con
 
         // forward
         op->forward(bottom_blob_bordered_g, top_blob_g, opt_g);
+    }
+
+    if (activation)
+    {
+        activation->forward_inplace(top_blob, opt);
     }
 
     return 0;

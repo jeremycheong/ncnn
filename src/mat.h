@@ -368,6 +368,7 @@ enum
 void copy_make_border(const Mat& src, Mat& dst, int top, int bottom, int left, int right, int type, float v, Allocator* allocator = 0, int num_threads = 1);
 void copy_cut_border(const Mat& src, Mat& dst, int top, int bottom, int left, int right, Allocator* allocator = 0, int num_threads = 1);
 void resize_bilinear(const Mat& src, Mat& dst, int w, int h, Allocator* allocator = 0, int num_threads = 1);
+void resize_bicubic(const Mat& src, Mat& dst, int w, int h, Allocator* allocator = 0, int num_threads = 1);
 void convert_packing(const Mat& src, Mat& dst, int packing, Allocator* allocator = 0, int num_threads = 1);
 void cast_float32_to_float16(const Mat& src, Mat& dst, Allocator* allocator = 0, int num_threads = 1);
 void cast_float16_to_float32(const Mat& src, Mat& dst, Allocator* allocator = 0, int num_threads = 1);
@@ -378,37 +379,37 @@ inline Mat::Mat()
 }
 
 inline Mat::Mat(int _w, size_t _elemsize, Allocator* _allocator)
-    : data(0), refcount(0), dims(0)
+    : data(0), refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _elemsize, _allocator);
 }
 
 inline Mat::Mat(int _w, int _h, size_t _elemsize, Allocator* _allocator)
-    : data(0), refcount(0), dims(0)
+    : data(0), refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _elemsize, _allocator);
 }
 
 inline Mat::Mat(int _w, int _h, int _c, size_t _elemsize, Allocator* _allocator)
-    : data(0), refcount(0), dims(0)
+    : data(0), refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _c, _elemsize, _allocator);
 }
 
 inline Mat::Mat(int _w, size_t _elemsize, int _packing, Allocator* _allocator)
-    : data(0), refcount(0), dims(0)
+    : data(0), refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _elemsize, _packing, _allocator);
 }
 
 inline Mat::Mat(int _w, int _h, size_t _elemsize, int _packing, Allocator* _allocator)
-    : data(0), refcount(0), dims(0)
+    : data(0), refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _elemsize, _packing, _allocator);
 }
 
 inline Mat::Mat(int _w, int _h, int _c, size_t _elemsize, int _packing, Allocator* _allocator)
-    : data(0), refcount(0), dims(0)
+    : data(0), refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _c, _elemsize, _packing, _allocator);
 }
@@ -489,7 +490,7 @@ inline Mat& Mat::operator=(const Mat& m)
 
 inline void Mat::fill(float _v)
 {
-    int size = total();
+    int size = (int)total();
     float* ptr = (float*)data;
 
 #if __ARM_NEON
@@ -543,7 +544,7 @@ inline void Mat::fill(float _v)
 
 inline void Mat::fill(int _v)
 {
-    int size = total();
+    int size = (int)total();
     int* ptr = (int*)data;
 
 #if __ARM_NEON
@@ -990,24 +991,24 @@ inline const Mat Mat::channel(int _c) const
 
 inline float* Mat::row(int y)
 {
-    return (float*)data + w * y;
+    return (float*)((unsigned char*)data + w * y * elemsize);
 }
 
 inline const float* Mat::row(int y) const
 {
-    return (const float*)data + w * y;
+    return (const float*)((unsigned char*)data + w * y * elemsize);
 }
 
 template <typename T>
 inline T* Mat::row(int y)
 {
-    return (T*)data + w * y;
+    return (T*)((unsigned char*)data + w * y * elemsize);
 }
 
 template <typename T>
 inline const T* Mat::row(int y) const
 {
-    return (const T*)data + w * y;
+    return (const T*)((unsigned char*)data + w * y * elemsize);
 }
 
 inline Mat Mat::channel_range(int _c, int channels)
@@ -1070,37 +1071,37 @@ inline VkMat::VkMat()
 }
 
 inline VkMat::VkMat(int _w, size_t _elemsize, VkAllocator* _allocator, VkAllocator* _staging_allocator)
-    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0)
+    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _elemsize, _allocator, _staging_allocator);
 }
 
 inline VkMat::VkMat(int _w, int _h, size_t _elemsize, VkAllocator* _allocator, VkAllocator* _staging_allocator)
-    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0)
+    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _elemsize, _allocator, _staging_allocator);
 }
 
 inline VkMat::VkMat(int _w, int _h, int _c, size_t _elemsize, VkAllocator* _allocator, VkAllocator* _staging_allocator)
-    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0)
+    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _c, _elemsize, _allocator, _staging_allocator);
 }
 
 inline VkMat::VkMat(int _w, size_t _elemsize, int _packing, VkAllocator* _allocator, VkAllocator* _staging_allocator)
-    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0)
+    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _elemsize, _packing, _allocator, _staging_allocator);
 }
 
 inline VkMat::VkMat(int _w, int _h, size_t _elemsize, int _packing, VkAllocator* _allocator, VkAllocator* _staging_allocator)
-    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0)
+    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _elemsize, _packing, _allocator, _staging_allocator);
 }
 
 inline VkMat::VkMat(int _w, int _h, int _c, size_t _elemsize, int _packing, VkAllocator* _allocator, VkAllocator* _staging_allocator)
-    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0)
+    : data(0), offset(0), staging_data(0), refcount(0), staging_refcount(0), elemsize(0), packing(0), allocator(0), dims(0), w(0), h(0), c(0), cstep(0)
 {
     create(_w, _h, _c, _elemsize, _packing, _allocator, _staging_allocator);
 }
