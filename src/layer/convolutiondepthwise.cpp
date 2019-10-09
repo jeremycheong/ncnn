@@ -37,8 +37,11 @@ int ConvolutionDepthWise::load_param(const ParamDict& pd)
     dilation_h = pd.get(12, dilation_w);
     stride_w = pd.get(3, 1);
     stride_h = pd.get(13, stride_w);
-    pad_w = pd.get(4, 0);
-    pad_h = pd.get(14, pad_w);
+    pad_left = pd.get(4, 0);
+    pad_right = pd.get(15, pad_left);
+    pad_top = pd.get(14, pad_left);
+    pad_bottom = pd.get(16, pad_top);
+    pad_value = pd.get(18, 0.f);
     bias_term = pd.get(5, 0);
     weight_data_size = pd.get(6, 0);
     group = pd.get(7, 1);
@@ -322,29 +325,41 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
     }
 
     Mat bottom_blob_bordered = bottom_blob_unbordered;
-    if (pad_w > 0 || pad_h > 0)
+    if (pad_left > 0 || pad_right > 0 || pad_top > 0 || pad_bottom > 0)
     {
-        copy_make_border(bottom_blob_unbordered, bottom_blob_bordered, pad_h, pad_h, pad_w, pad_w, BORDER_CONSTANT, 0.f, opt.workspace_allocator, opt.num_threads);
-        if (bottom_blob_bordered.empty())
-            return -100;
-
-        w = bottom_blob_bordered.w;
-        h = bottom_blob_bordered.h;
+        Option opt_b = opt;
+        opt_b.blob_allocator = opt.workspace_allocator;
+        copy_make_border(bottom_blob_unbordered, bottom_blob_bordered, pad_top, pad_bottom, pad_left, pad_right, BORDER_CONSTANT, pad_value, opt_b);
     }
-    else if (pad_w == -233 && pad_h == -233)
+    else if (pad_left == -233 && pad_right == -233 && pad_top == -233 && pad_bottom == -233)
     {
+        // tensorflow padding=SAME or onnx padding=SAME_UPPER
         int wpad = kernel_extent_w + (w - 1) / stride_w * stride_w - w;
         int hpad = kernel_extent_h + (h - 1) / stride_h * stride_h - h;
         if (wpad > 0 || hpad > 0)
         {
-            copy_make_border(bottom_blob_unbordered, bottom_blob_bordered, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, BORDER_CONSTANT, 0.f, opt.workspace_allocator, opt.num_threads);
-            if (bottom_blob_bordered.empty())
-                return -100;
+            Option opt_b = opt;
+            opt_b.blob_allocator = opt.workspace_allocator;
+            copy_make_border(bottom_blob_unbordered, bottom_blob_bordered, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, BORDER_CONSTANT, pad_value, opt_b);
         }
-
-        w = bottom_blob_bordered.w;
-        h = bottom_blob_bordered.h;
     }
+    else if (pad_left == -234 && pad_right == -234 && pad_top == -234 && pad_bottom == -234)
+    {
+        // onnx padding=SAME_LOWER
+        int wpad = kernel_extent_w + (w - 1) / stride_w * stride_w - w;
+        int hpad = kernel_extent_h + (h - 1) / stride_h * stride_h - h;
+        if (wpad > 0 || hpad > 0)
+        {
+            Option opt_b = opt;
+            opt_b.blob_allocator = opt.workspace_allocator;
+            copy_make_border(bottom_blob_unbordered, bottom_blob_bordered, hpad - hpad / 2, hpad / 2, wpad - wpad / 2, wpad / 2, BORDER_CONSTANT, pad_value, opt_b);
+        }
+    }
+    if (bottom_blob_bordered.empty())
+        return -100;
+
+    w = bottom_blob_bordered.w;
+    h = bottom_blob_bordered.h;
 
     int outw = (w - kernel_extent_w) / stride_w + 1;
     int outh = (h - kernel_extent_h) / stride_h + 1;
@@ -390,7 +405,7 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
                 #pragma omp parallel for num_threads(opt.num_threads)
                 for (int g=0; g<group; g++)
                 {
-                    int* outptr = top_blob.channel(g);
+                    int* outptr = top_blob_tm.channel(g);
                     const signed char* kptr = (const signed char*)weight_data + maxk * g;
                     const Mat m = bottom_blob_bordered.channel(g);
 
@@ -425,6 +440,18 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
                         Mat top_blob_g = top_blob.channel_range(g, 1);
                         requantize_ops[g]->forward(top_blob_tm_g, top_blob_g, opt_g);
                     }
+
+                    // activation relu
+                    if (activation_type == 1)
+                    {
+                        signed char* outptr_s8 = top_blob.channel(g);
+
+                        for (int i = 0; i < outh*outw; i++)
+                        {
+                            if (outptr_s8[i] < 0)
+                                outptr_s8[i] = 0;
+                        }
+                    }                       
                 }
             }
             else
@@ -432,16 +459,16 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
                 const int channels_g = channels / group;
                 const int num_output_g = num_output / group;
 
-    #ifdef _WIN32
+#ifdef _WIN32
                 #pragma omp parallel for num_threads(opt.num_threads)
-    #else // _WIN32
+#else // _WIN32
                 #pragma omp parallel for collapse(2) num_threads(opt.num_threads)
-    #endif // _WIN32
+#endif // _WIN32
                 for (int g=0; g<group; g++)
                 {
                     for (int p=0; p<num_output_g; p++)
                     {
-                        int* outptr = top_blob.channel(g * num_output_g + p);
+                        int* outptr = top_blob_tm.channel(g * num_output_g + p);
                         const signed char* weight_data_ptr = (const signed char*)weight_data + maxk * channels_g * num_output_g * g;
 
                         for (int i = 0; i < outh; i++)
@@ -486,9 +513,23 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
 
                     Mat top_blob_tm_g = top_blob_tm.channel_range(num_output_g * g, num_output_g);
                     Mat top_blob_g = top_blob.channel_range(num_output_g * g, num_output_g);
-                    requantize_ops[g]->forward(top_blob_tm_g, top_blob_g, opt_g);                    
+                    requantize_ops[g]->forward(top_blob_tm_g, top_blob_g, opt_g);   
+
+                    if (activation_type == 1)
+                    {
+                        for (int p=0; p<num_output_g; p++)
+                        { 
+                            signed char* outptr_s8 = top_blob.channel(g * num_output_g + p);   
+
+                            for (int i = 0; i < outh*outw; i++)
+                            {
+                                if (outptr_s8[i] < 0)
+                                    outptr_s8[i] = 0;
+                            }
+                        }
+                    }
                 }
-            }            
+            }
         }
         else
         {
@@ -536,6 +577,17 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
                         Mat top_blob_g = top_blob.channel_range(g, 1);
                         dequantize_ops[g]->forward_inplace(top_blob_g, opt_g);
                     }
+
+                    // activation relu
+                    if (activation_type == 1)
+                    {
+                        float* outptr_fp32 = top_blob.channel(g);
+
+                        for (int i = 0; i < outh*outw; i++)
+                        {
+                            outptr_fp32[i] = std::max(outptr_fp32[i], 0.f);
+                        }
+                    }                    
                 }
             }
             else
@@ -543,11 +595,11 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
                 const int channels_g = channels / group;
                 const int num_output_g = num_output / group;
 
-    #ifdef _WIN32
+#ifdef _WIN32
                 #pragma omp parallel for num_threads(opt.num_threads)
-    #else // _WIN32
+#else // _WIN32
                 #pragma omp parallel for collapse(2) num_threads(opt.num_threads)
-    #endif // _WIN32
+#endif // _WIN32
                 for (int g=0; g<group; g++)
                 {
                     for (int p=0; p<num_output_g; p++)
@@ -597,6 +649,19 @@ int ConvolutionDepthWise::forward(const Mat& bottom_blob, Mat& top_blob, const O
 
                     Mat top_blob_g = top_blob.channel_range(num_output_g * g, num_output_g);
                     dequantize_ops[g]->forward_inplace(top_blob_g, opt_g);
+
+                    if (activation_type == 1)
+                    {
+                        for (int p=0; p<num_output_g; p++)
+                        { 
+                            float* outptr_fp32 = top_blob.channel(g * num_output_g + p);   
+
+                            for (int i = 0; i < outh*outw; i++)
+                            {
+                                outptr_fp32[i] = std::max(outptr_fp32[i], 0.f);
+                            }
+                        }
+                    }                    
                 }
             }
         }

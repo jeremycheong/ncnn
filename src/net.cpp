@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -153,7 +154,10 @@ int Net::load_param(FILE* fp)
     if (opt.use_vulkan_compute)
     {
         if (!vkdev) vkdev = get_gpu_device();
-
+        if (!vkdev) opt.use_vulkan_compute = false;// no vulkan device, fallback to cpu
+    }
+    if (opt.use_vulkan_compute)
+    {
         // sanitize use options
         if (!vkdev->info.support_fp16_packed) opt.use_fp16_packed = false;
         if (!vkdev->info.support_fp16_storage) opt.use_fp16_storage = false;
@@ -324,7 +328,10 @@ int Net::load_param_mem(const char* _mem)
     if (opt.use_vulkan_compute)
     {
         if (!vkdev) vkdev = get_gpu_device();
-
+        if (!vkdev) opt.use_vulkan_compute = false;// no vulkan device, fallback to cpu
+    }
+    if (opt.use_vulkan_compute)
+    {
         // sanitize use options
         if (!vkdev->info.support_fp16_packed) opt.use_fp16_packed = false;
         if (!vkdev->info.support_fp16_storage) opt.use_fp16_storage = false;
@@ -499,7 +506,10 @@ int Net::load_param_bin(FILE* fp)
     if (opt.use_vulkan_compute)
     {
         if (!vkdev) vkdev = get_gpu_device();
-
+        if (!vkdev) opt.use_vulkan_compute = false;// no vulkan device, fallback to cpu
+    }
+    if (opt.use_vulkan_compute)
+    {
         // sanitize use options
         if (!vkdev->info.support_fp16_packed) opt.use_fp16_packed = false;
         if (!vkdev->info.support_fp16_storage) opt.use_fp16_storage = false;
@@ -688,7 +698,7 @@ int Net::load_model(const char* modelpath)
 
 int Net::load_param(const unsigned char* _mem)
 {
-    if ((unsigned long)_mem & 0x3)
+    if ((uintptr_t)_mem & 0x3)
     {
         // reject unaligned memory
         fprintf(stderr, "memory not 32-bit aligned at %p\n", _mem);
@@ -719,7 +729,10 @@ int Net::load_param(const unsigned char* _mem)
     if (opt.use_vulkan_compute)
     {
         if (!vkdev) vkdev = get_gpu_device();
-
+        if (!vkdev) opt.use_vulkan_compute = false;// no vulkan device, fallback to cpu
+    }
+    if (opt.use_vulkan_compute)
+    {
         // sanitize use options
         if (!vkdev->info.support_fp16_packed) opt.use_fp16_packed = false;
         if (!vkdev->info.support_fp16_storage) opt.use_fp16_storage = false;
@@ -822,7 +835,7 @@ int Net::load_model(const unsigned char* _mem)
         return -1;
     }
 
-    if ((unsigned long)_mem & 0x3)
+    if ((uintptr_t)_mem & 0x3)
     {
         // reject unaligned memory
         fprintf(stderr, "memory not 32-bit aligned at %p\n", _mem);
@@ -907,7 +920,40 @@ int Net::fuse_network()
                 int layer_next_index = blobs[layer->tops[0]].consumers[n];
                 Layer* layer_next = layers[layer_next_index];
 
-                if (layer_next->type == "ReLU")
+                if (layer_next->type == "Convolution" || layer_next->type == "ConvolutionDepthWise")
+                {
+                    if (layer_next->type == "Convolution" && ((Convolution*)layer_next)->use_int8_inference == false)
+                        continue;
+                    if (layer_next->type == "ConvolutionDepthWise" && ((ConvolutionDepthWise*)layer_next)->use_int8_inference == false)
+                        continue;    
+
+                    // fprintf(stderr, "%s, %s\n", layer->name.c_str(), layer_next->name.c_str());
+                    if (layer->type == "Convolution" && layer_next->type == "Convolution")
+                    {
+                        ((Convolution*)layer)->use_int8_requantize = true;
+                        ((Convolution*)layer)->top_blob_int8_scale = ((Convolution*)layer_next)->bottom_blob_int8_scale;
+                        ((Convolution*)layer)->create_requantize_op();
+                    }
+                    else if (layer->type == "ConvolutionDepthWise" && layer_next->type == "Convolution")
+                    {
+                        ((ConvolutionDepthWise*)layer)->use_int8_requantize = true;
+                        ((ConvolutionDepthWise*)layer)->top_blob_int8_scale = ((Convolution*)layer_next)->bottom_blob_int8_scale;
+                        ((ConvolutionDepthWise*)layer)->create_requantize_op();
+                    }
+                    else if (layer->type == "Convolution" && layer_next->type == "ConvolutionDepthWise")
+                    {
+                        ((Convolution*)layer)->use_int8_requantize = true;
+                        ((Convolution*)layer)->top_blob_int8_scale = ((ConvolutionDepthWise*)layer_next)->bottom_blob_int8_scales[0];
+                        ((Convolution*)layer)->create_requantize_op();
+                    }
+                    else
+                    {
+                        ((ConvolutionDepthWise*)layer)->use_int8_requantize = true;
+                        ((ConvolutionDepthWise*)layer)->top_blob_int8_scale = ((ConvolutionDepthWise*)layer_next)->bottom_blob_int8_scales[0];
+                        ((ConvolutionDepthWise*)layer)->create_requantize_op();
+                    }
+                }                  
+                else if (layer_next->type == "ReLU")
                 {
                     int layer_next_2_index = blobs[layer_next->tops[0]].consumers[0];
                     Layer* layer_next_2 = layers[layer_next_2_index];
@@ -919,7 +965,7 @@ int Net::fuse_network()
                         if (layer_next_2->type == "ConvolutionDepthWise" && ((ConvolutionDepthWise*)layer_next_2)->use_int8_inference == false)
                             continue;    
 
-                        // fprintf(stderr, "%s, %s, %s\n", layer->name.c_str(), layer_next->name.c_str(), layer_next_2->name.c_str());
+                        fprintf(stderr, "%s, %s, %s\n", layer->name.c_str(), layer_next->name.c_str(), layer_next_2->name.c_str());
                         if (layer->type == "Convolution" && layer_next_2->type == "Convolution")
                         {
                             ((Convolution*)layer)->use_int8_requantize = true;
@@ -1046,6 +1092,11 @@ void Net::set_vulkan_device(int device_index)
 void Net::set_vulkan_device(const VulkanDevice* _vkdev)
 {
     vkdev = _vkdev;
+}
+
+const VulkanDevice* Net::vulkan_device() const
+{
+    return vkdev;
 }
 
 int Net::upload_model()
@@ -1257,6 +1308,15 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, Option& opt
             }
         }
 
+        if (opt.use_packing_layout)
+        {
+            int elempack = layer->support_packing ? 4 : 1;
+
+            Mat bottom_blob_packed;
+            convert_packing(bottom_blob, bottom_blob_packed, elempack, opt);
+            bottom_blob = bottom_blob_packed;
+        }
+
         // forward
         if (opt.lightmode && layer->support_inplace)
         {
@@ -1320,6 +1380,15 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, Option& opt
                 {
                     bottom_blobs[i] = bottom_blobs[i].clone();
                 }
+            }
+
+            if (opt.use_packing_layout)
+            {
+                int elempack = layer->support_packing ? 4 : 1;
+
+                Mat bottom_blob_packed;
+                convert_packing(bottom_blobs[i], bottom_blob_packed, elempack, opt);
+                bottom_blobs[i] = bottom_blob_packed;
             }
         }
 
@@ -1409,7 +1478,7 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                     Mat bottom_blob_cpu_fp16;
                     if (opt.use_fp16_storage && vkdev->info.type == 0)
                     {
-                        ncnn::cast_float32_to_float16(bottom_blob_cpu, bottom_blob_cpu_fp16, opt.blob_allocator, opt.num_threads);
+                        ncnn::cast_float32_to_float16(bottom_blob_cpu, bottom_blob_cpu_fp16, opt);
                     }
                     else
                     {
@@ -1522,7 +1591,7 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                         Mat bottom_blob_cpu_fp16;
                         if (opt.use_fp16_storage && vkdev->info.type == 0)
                         {
-                            ncnn::cast_float32_to_float16(bottom_blob_cpu, bottom_blob_cpu_fp16, opt.blob_allocator, opt.num_threads);
+                            ncnn::cast_float32_to_float16(bottom_blob_cpu, bottom_blob_cpu_fp16, opt);
                         }
                         else
                         {
@@ -1663,9 +1732,16 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                         }
                     }
 
-                    // unpacking
                     VkMat bottom_blob_unpacked_fp16;
-                    packing_pack1->forward(bottom_blob, bottom_blob_unpacked_fp16, cmd, opt);
+                    if (opt.use_packing_layout)
+                    {
+                        bottom_blob_unpacked_fp16 = bottom_blob;
+                    }
+                    else
+                    {
+                        // unpacking
+                        packing_pack1->forward(bottom_blob, bottom_blob_unpacked_fp16, cmd, opt);
+                    }
 
                     // cast to fp32 (integrated gpu)
                     VkMat bottom_blob_unpacked;
@@ -1711,7 +1787,7 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                     Mat& bottom_blob_cpu = blob_mats[bottom_blob_index];
                     if (opt.use_fp16_storage && vkdev->info.type == 0)
                     {
-                        ncnn::cast_float16_to_float32(bottom_blob_cpu_fp16, bottom_blob_cpu, opt.blob_allocator, opt.num_threads);
+                        ncnn::cast_float16_to_float32(bottom_blob_cpu_fp16, bottom_blob_cpu, opt);
                     }
                     else
                     {
@@ -1731,6 +1807,15 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                 {
                     bottom_blob = bottom_blob.clone();
                 }
+            }
+
+            if (opt.use_packing_layout)
+            {
+                int elempack = layer->support_packing ? 4 : 1;
+
+                Mat bottom_blob_packed;
+                convert_packing(bottom_blob, bottom_blob_packed, elempack, opt);
+                bottom_blob = bottom_blob_packed;
             }
 
             // forward
@@ -1810,9 +1895,16 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                             }
                         }
 
-                        // unpacking
                         VkMat bottom_blob_unpacked_fp16;
-                        packing_pack1->forward(bottom_blob, bottom_blob_unpacked_fp16, cmd, opt);
+                        if (opt.use_packing_layout)
+                        {
+                            bottom_blob_unpacked_fp16 = bottom_blob;
+                        }
+                        else
+                        {
+                            // unpacking
+                            packing_pack1->forward(bottom_blob, bottom_blob_unpacked_fp16, cmd, opt);
+                        }
 
                         // cast to fp32 (integrated gpu)
                         VkMat& bottom_blob_unpacked = bottom_blobs_unpacked[i];
@@ -1872,7 +1964,7 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                     Mat& bottom_blob_cpu = blob_mats[bottom_blob_index];
                     if (opt.use_fp16_storage && vkdev->info.type == 0)
                     {
-                        ncnn::cast_float16_to_float32(bottom_blob_cpu_fp16, bottom_blob_cpu, opt.blob_allocator, opt.num_threads);
+                        ncnn::cast_float16_to_float32(bottom_blob_cpu_fp16, bottom_blob_cpu, opt);
                     }
                     else
                     {
@@ -1891,6 +1983,15 @@ int Net::forward_layer(int layer_index, std::vector<Mat>& blob_mats, std::vector
                     {
                         bottom_blobs[i] = bottom_blobs[i].clone();
                     }
+                }
+
+                if (opt.use_packing_layout)
+                {
+                    int elempack = layer->support_packing ? 4 : 1;
+
+                    Mat bottom_blob_packed;
+                    convert_packing(bottom_blobs[i], bottom_blob_packed, elempack, opt);
+                    bottom_blobs[i] = bottom_blob_packed;
                 }
             }
 
@@ -1959,14 +2060,6 @@ Extractor::Extractor(const Net* _net, int blob_count) : net(_net)
 #if NCNN_VULKAN
     if (net->opt.use_vulkan_compute)
     {
-        // set default vulkan blob/workspace/staging allocator
-        if (!opt.blob_vkallocator)
-            opt.blob_vkallocator = net->vkdev->allocator();
-        if (!opt.workspace_vkallocator)
-            opt.workspace_vkallocator = net->vkdev->allocator();
-        if (!opt.staging_vkallocator)
-            opt.staging_vkallocator = net->vkdev->staging_allocator();
-
         blob_mats_gpu.resize(blob_count);
     }
 #endif // NCNN_VULKAN
@@ -1982,6 +2075,16 @@ void Extractor::set_num_threads(int num_threads)
     opt.num_threads = num_threads;
 }
 
+void Extractor::set_blob_allocator(Allocator* allocator)
+{
+    opt.blob_allocator = allocator;
+}
+
+void Extractor::set_workspace_allocator(Allocator* allocator)
+{
+    opt.workspace_allocator = allocator;
+}
+
 #if NCNN_VULKAN
 void Extractor::set_vulkan_compute(bool enable)
 {
@@ -1993,6 +2096,21 @@ void Extractor::set_vulkan_compute(bool enable)
     {
         fprintf(stderr, "set_vulkan_compute failed, network use_vulkan_compute disabled\n");
     }
+}
+
+void Extractor::set_blob_vkallocator(VkAllocator* allocator)
+{
+    opt.blob_vkallocator = allocator;
+}
+
+void Extractor::set_workspace_vkallocator(VkAllocator* allocator)
+{
+    opt.workspace_vkallocator = allocator;
+}
+
+void Extractor::set_staging_vkallocator(VkAllocator* allocator)
+{
+    opt.staging_vkallocator = allocator;
 }
 #endif // NCNN_VULKAN
 
@@ -2040,6 +2158,25 @@ int Extractor::extract(int blob_index, Mat& feat)
 #if NCNN_VULKAN
         if (opt.use_vulkan_compute)
         {
+            VkAllocator* local_blob_allocator = 0;
+            VkAllocator* local_staging_allocator = 0;
+
+            // use local allocator
+            if (!opt.blob_vkallocator)
+            {
+                local_blob_allocator = net->vkdev->acquire_blob_allocator();
+                opt.blob_vkallocator = local_blob_allocator;
+            }
+            if (!opt.workspace_vkallocator)
+            {
+                opt.workspace_vkallocator = opt.blob_vkallocator;
+            }
+            if (!opt.staging_vkallocator)
+            {
+                local_staging_allocator = net->vkdev->acquire_staging_allocator();
+                opt.staging_vkallocator = local_staging_allocator;
+            }
+
             ncnn::VkCompute cmd(net->vkdev);
 #if NCNN_BENCHMARK
             cmd.create_query_pool(net->layers.size() * 2);
@@ -2096,12 +2233,27 @@ int Extractor::extract(int blob_index, Mat& feat)
                 Mat& feat_cpu = blob_mats[blob_index];
                 if (opt.use_fp16_storage && net->vkdev->info.type == 0)
                 {
-                    ncnn::cast_float16_to_float32(feat_cpu_fp16, feat_cpu, opt.blob_allocator, opt.num_threads);
+                    ncnn::cast_float16_to_float32(feat_cpu_fp16, feat_cpu, opt);
                 }
                 else
                 {
                     feat_cpu = feat_cpu_fp16;
                 }
+            }
+
+            if (local_blob_allocator)
+            {
+                net->vkdev->reclaim_blob_allocator(local_blob_allocator);
+                if (opt.workspace_vkallocator == opt.blob_vkallocator)
+                {
+                    opt.workspace_vkallocator = 0;
+                }
+                opt.blob_vkallocator = 0;
+            }
+            if (local_staging_allocator)
+            {
+                net->vkdev->reclaim_staging_allocator(local_staging_allocator);
+                opt.staging_vkallocator = 0;
             }
         }
         else
@@ -2115,6 +2267,13 @@ int Extractor::extract(int blob_index, Mat& feat)
     }
 
     feat = blob_mats[blob_index];
+
+    if (opt.use_packing_layout)
+    {
+        Mat bottom_blob_unpacked;
+        convert_packing(feat, bottom_blob_unpacked, 1, opt);
+        feat = bottom_blob_unpacked;
+    }
 
     return ret;
 }
