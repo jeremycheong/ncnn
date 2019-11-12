@@ -20,6 +20,7 @@
 #if __ARM_NEON
 #include <arm_neon.h>
 #include "neon_mathfun.h"
+#include "neon_activation.h"
 #endif // __ARM_NEON
 
 namespace ncnn {
@@ -39,8 +40,12 @@ namespace ncnn {
 
 #if __ARM_NEON
 #include "convolution_1x1_pack4.h"
+#include "convolution_1x1_pack4to1.h"
 #include "convolution_3x3_pack4.h"
 #include "convolution_3x3_pack1to4.h"
+#include "convolution_3x3_pack4to1.h"
+#include "convolution_5x5_pack4.h"
+#include "convolution_7x7_pack1to4.h"
 #endif // __ARM_NEON
 
 DEFINE_LAYER_CREATOR(Convolution_arm)
@@ -49,6 +54,7 @@ Convolution_arm::Convolution_arm()
 {
 #if __ARM_NEON
     support_packing = true;
+    use_fp32_packing_inference = false;
 #endif // __ARM_NEON
 
     activation = 0;
@@ -90,24 +96,44 @@ int Convolution_arm::create_pipeline(const Option& opt)
 
     if (activation)
     {
-        Option opt_cpu = opt;
-        opt_cpu.use_vulkan_compute = false;
-        activation->create_pipeline(opt_cpu);
+        activation->create_pipeline(opt);
     }
 
     const int maxk = kernel_w * kernel_h;
     int num_input = weight_data_size / maxk / num_output;
 
 #if __ARM_NEON
-    if (opt.use_packing_layout)
+    bool weight_data_is_float32 = (weight_data.elemsize == (size_t)4u);
+
+    use_fp32_packing_inference = opt.use_packing_layout && weight_data_is_float32 && !use_int8_inference;
+
+    if (use_int8_inference)
+    {
+        support_packing = false;
+    }
+
+    if (use_fp32_packing_inference)
     {
 
     // pack4
     if (num_input % 4 == 0 && num_output % 4 == 0)
     {
-        // src = kw-kh-inch-outch
-        // dst = 4b-4a-kw-kh-inch/4a-outch/4b
+        if (kernel_w == 1 && kernel_h == 1 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
         {
+            conv1x1s1_sgemm_transform_kernel_pack4_neon(weight_data, weight_data_pack4, num_input, num_output);
+        }
+        else if (kernel_w == 1 && kernel_h == 1 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv1x1s1_sgemm_transform_kernel_pack4_neon(weight_data, weight_data_pack4, num_input, num_output);
+        }
+        else if (kernel_w == 3 && kernel_h == 3 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv3x3s1_winograd64_transform_kernel_pack4_neon(weight_data, weight_data_pack4, num_input, num_output);
+        }
+        else
+        {
+            // src = kw-kh-inch-outch
+            // dst = 4b-4a-kw-kh-inch/4a-outch/4b
             Mat weight_data_r2 = weight_data.reshape(maxk, num_input, num_output);
 
             weight_data_pack4.create(maxk, num_input/4, num_output/4, (size_t)4*16, 16);
@@ -173,10 +199,7 @@ int Convolution_arm::create_pipeline(const Option& opt)
             }
         }
 
-        if (kernel_w == 3 && kernel_h == 3 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
-        {
-            conv3x3s1_winograd64_transform_kernel_pack4_neon(weight_data, weight_3x3_winograd64_data_pack4, num_input, num_output);
-        }
+        return 0;
     }
 
     // pack1to4
@@ -219,14 +242,29 @@ int Convolution_arm::create_pipeline(const Option& opt)
                 }
             }
         }
+
+        return 0;
     }
 
     // pack4to1
     if (num_input % 4 == 0 && num_output % 4 != 0)
     {
-        // src = kw-kh-inch-outch
-        // dst = 4a-kw-kh-inch/4a-outch
+        if (kernel_w == 1 && kernel_h == 1 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
         {
+            conv1x1s1_sgemm_transform_kernel_pack4to1_neon(weight_data, weight_data_pack4to1, num_input, num_output);
+        }
+        else if (kernel_w == 1 && kernel_h == 1 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv1x1s1_sgemm_transform_kernel_pack4to1_neon(weight_data, weight_data_pack4to1, num_input, num_output);
+        }
+        else if (kernel_w == 3 && kernel_h == 3 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv3x3s1_winograd64_transform_kernel_pack4to1_neon(weight_data, weight_data_pack4to1, num_input, num_output);
+        }
+        else
+        {
+            // src = kw-kh-inch-outch
+            // dst = 4a-kw-kh-inch/4a-outch
             Mat weight_data_r2 = weight_data.reshape(maxk, num_input, num_output);
 
             weight_data_pack4to1.create(maxk, num_input/4, num_output, (size_t)4*4, 4);
@@ -257,6 +295,8 @@ int Convolution_arm::create_pipeline(const Option& opt)
                 }
             }
         }
+
+        return 0;
     }
 
     } // opt.use_packing_layout
@@ -363,9 +403,7 @@ int Convolution_arm::destroy_pipeline(const Option& opt)
 {
     if (activation)
     {
-        Option opt_cpu = opt;
-        opt_cpu.use_vulkan_compute = false;
-        activation->destroy_pipeline(opt_cpu);
+        activation->destroy_pipeline(opt);
         delete activation;
         activation = 0;
     }
@@ -473,7 +511,7 @@ int Convolution_arm::forwardDilation(const Mat& bottom_blob, Mat& top_blob, conv
                 }
             }
 
-            ncnn::Option opt_g = opt;
+            Option opt_g = opt;
             opt_g.blob_allocator = inner_top_blob.allocator;
             conv(inner_bottom_blob, inner_top_blob, weight_data, bias_data, opt_g);
 
@@ -503,7 +541,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
     // value = value + bias
 
 #if __ARM_NEON
-    if (opt.use_packing_layout)
+    if (use_fp32_packing_inference)
     {
 
     int w = bottom_blob.w;
@@ -597,9 +635,57 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
             return 0;
         }
 
+        if (kernel_w == 1 && kernel_h == 1 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv1x1s2_pack4_neon(bottom_blob_bordered, top_blob, weight_data_pack4, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
         if (kernel_w == 3 && kernel_h == 3 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
         {
-            conv3x3s1_winograd64_pack4_neon(bottom_blob_bordered, top_blob, weight_3x3_winograd64_data_pack4, bias_data, opt);
+            conv3x3s1_winograd64_pack4_neon(bottom_blob_bordered, top_blob, weight_data_pack4, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
+        if (kernel_w == 3 && kernel_h == 3 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv3x3s2_pack4_neon(bottom_blob_bordered, top_blob, weight_data_pack4, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
+        if (kernel_w == 5 && kernel_h == 5 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv5x5s1_pack4_neon(bottom_blob_bordered, top_blob, weight_data_pack4, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
+        if (kernel_w == 5 && kernel_h == 5 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv5x5s2_pack4_neon(bottom_blob_bordered, top_blob, weight_data_pack4, bias_data, opt);
 
             if (activation)
             {
@@ -659,37 +745,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
                         }
                     }
 
-                    if (activation_type == 1)
-                    {
-                        float32x4_t _zero = vdupq_n_f32(0.f);
-                        _sum = vmaxq_f32(_sum, _zero);
-                    }
-                    else if (activation_type == 2)
-                    {
-                        float32x4_t _zero = vdupq_n_f32(0.f);
-                        float32x4_t _slope = vdupq_n_f32(activation_params[0]);
-                        uint32x4_t _lemask = vcleq_f32(_sum, _zero);
-                        float32x4_t _ps = vmulq_f32(_sum, _slope);
-                        _sum = vbslq_f32(_lemask, _ps, _sum);
-                    }
-                    else if (activation_type == 3)
-                    {
-                        float32x4_t _min = vdupq_n_f32(activation_params[0]);
-                        float32x4_t _max = vdupq_n_f32(activation_params[1]);
-                        _sum = vmaxq_f32(_sum, _min);
-                        _sum = vminq_f32(_sum, _max);
-                    }
-                    else if (activation_type == 4)
-                    {
-                        float32x4_t _one = vdupq_n_f32(1.f);
-                        _sum = vnegq_f32(_sum);
-                        _sum = exp_ps(_sum);
-                        _sum = vaddq_f32(_sum, _one);
-                        float32x4_t _outp = vrecpeq_f32(_sum);
-                        _outp = vmulq_f32(vrecpsq_f32(_sum, _outp), _outp);
-//                         _outp = vmulq_f32(vrecpsq_f32(_sum, _outp), _outp);
-                        _sum = _outp;
-                    }
+                    _sum = activation_ps(_sum, activation_type, activation_params);
 
                     vst1q_f32(outptr + j * 4, _sum);
                 }
@@ -718,6 +774,18 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
         if (kernel_w == 3 && kernel_h == 3 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
         {
             conv3x3s2_pack1to4_neon(bottom_blob_bordered, top_blob, weight_data_pack1to4, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
+        if (kernel_w == 7 && kernel_h == 7 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv7x7s2_pack1to4_neon(bottom_blob_bordered, top_blob, weight_data_pack1to4, bias_data, opt);
 
             if (activation)
             {
@@ -762,37 +830,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
                         }
                     }
 
-                    if (activation_type == 1)
-                    {
-                        float32x4_t _zero = vdupq_n_f32(0.f);
-                        _sum = vmaxq_f32(_sum, _zero);
-                    }
-                    else if (activation_type == 2)
-                    {
-                        float32x4_t _zero = vdupq_n_f32(0.f);
-                        float32x4_t _slope = vdupq_n_f32(activation_params[0]);
-                        uint32x4_t _lemask = vcleq_f32(_sum, _zero);
-                        float32x4_t _ps = vmulq_f32(_sum, _slope);
-                        _sum = vbslq_f32(_lemask, _ps, _sum);
-                    }
-                    else if (activation_type == 3)
-                    {
-                        float32x4_t _min = vdupq_n_f32(activation_params[0]);
-                        float32x4_t _max = vdupq_n_f32(activation_params[1]);
-                        _sum = vmaxq_f32(_sum, _min);
-                        _sum = vminq_f32(_sum, _max);
-                    }
-                    else if (activation_type == 4)
-                    {
-                        float32x4_t _one = vdupq_n_f32(1.f);
-                        _sum = vnegq_f32(_sum);
-                        _sum = exp_ps(_sum);
-                        _sum = vaddq_f32(_sum, _one);
-                        float32x4_t _outp = vrecpeq_f32(_sum);
-                        _outp = vmulq_f32(vrecpsq_f32(_sum, _outp), _outp);
-//                         _outp = vmulq_f32(vrecpsq_f32(_sum, _outp), _outp);
-                        _sum = _outp;
-                    }
+                    _sum = activation_ps(_sum, activation_type, activation_params);
 
                     vst1q_f32(outptr + j * 4, _sum);
                 }
@@ -806,6 +844,45 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
 
     if (elempack == 4 && out_elempack == 1)
     {
+        if (kernel_w == 1 && kernel_h == 1 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv1x1s1_sgemm_pack4to1_neon(bottom_blob_bordered, top_blob, weight_data_pack4to1, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
+        if (kernel_w == 1 && kernel_h == 1 && stride_w == 2 && stride_h == 2 && dilation_w == 1 && dilation_h == 1)
+        {
+            conv1x1s2_pack4to1_neon(bottom_blob_bordered, top_blob, weight_data_pack4to1, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
+        if (kernel_w == 3 && kernel_h == 3 && stride_w == 1 && stride_h == 1 && dilation_w == 1 && dilation_h == 1)
+        {
+            // TODO more proper condition
+            conv3x3s1_winograd64_pack4to1_neon(bottom_blob_bordered, top_blob, weight_data_pack4to1, bias_data, opt);
+
+//             conv3x3s1_pack4to1_neon(bottom_blob_bordered, top_blob, weight_data_pack4to1, bias_data, opt);
+
+            if (activation)
+            {
+                activation->forward_inplace(top_blob, opt);
+            }
+
+            return 0;
+        }
+
         // num_output
         #pragma omp parallel for num_threads(opt.num_threads)
         for (int p=0; p<num_output; p++)
@@ -848,28 +925,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
                         }
                     }
 
-                    if (activation_type == 1)
-                    {
-                        sum = std::max(sum, 0.f);
-                    }
-                    else if (activation_type == 2)
-                    {
-                        float slope = activation_params[0];
-                        sum = sum > 0.f ? sum : sum * slope;
-                    }
-                    else if (activation_type == 3)
-                    {
-                        float min = activation_params[0];
-                        float max = activation_params[1];
-                        if (sum < min)
-                            sum = min;
-                        if (sum > max)
-                            sum = max;
-                    }
-                    else if (activation_type == 4)
-                    {
-                        sum = 1.f / (1.f + exp(-sum));
-                    }
+                    sum = activation_ss(sum, activation_type, activation_params);
 
                     outptr[j] = sum;
                 }
@@ -1044,7 +1100,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
 
         // quantize, scale and round to nearest
         {
-            ncnn::Option opt_g = opt;
+            Option opt_g = opt;
             opt_g.blob_allocator = bottom_blob_int8.allocator;
 
             quantize->forward(bottom_blob, bottom_blob_int8, opt_g);
@@ -1134,7 +1190,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
             #pragma omp parallel for num_threads(opt.num_threads)
             for (int p=0; p<num_output; p++)
             {
-                ncnn::Option opt_g = opt;
+                Option opt_g = opt;
                 opt_g.num_threads = 1;
                 opt_g.blob_allocator = top_blob.allocator;
 
@@ -1179,7 +1235,7 @@ int Convolution_arm::forward(const Mat& bottom_blob, Mat& top_blob, const Option
             #pragma omp parallel for num_threads(opt.num_threads)
             for (int p=0; p<num_output; p++)
             {
-                ncnn::Option opt_g = opt;
+                Option opt_g = opt;
                 opt_g.num_threads = 1;
                 opt_g.blob_allocator = top_blob.allocator;
 

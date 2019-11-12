@@ -77,22 +77,16 @@ int Convolution::load_model(const ModelBin& mb)
 
 int Convolution::create_pipeline(const Option& opt)
 {
-    Option opt_cpu = opt;
-    opt_cpu.use_vulkan_compute = false;
-
-    use_int8_inference = opt.use_int8_inference;
-
-    if (int8_scale_term == 0)
-        use_int8_inference = false;
-
     bool weight_data_is_int8 = (weight_data.elemsize == (size_t)1u);
     bool weight_data_is_float32 = (weight_data.elemsize == (size_t)4u);
 
-    if (weight_data_is_int8 && !use_int8_inference)
+    if (weight_data_is_int8 && !opt.use_int8_inference)
     {
         fprintf(stderr, "quantized int8 weight loaded but use_int8_inference disabled\n");
         return -1;
     }
+
+    use_int8_inference = opt.use_int8_inference && (weight_data_is_int8 || (weight_data_is_float32 && int8_scale_term));
 
     // runtime quantize the weight data
     if (weight_data_is_float32 && use_int8_inference)
@@ -113,14 +107,14 @@ int Convolution::create_pipeline(const Option& opt)
 
             op->load_param(pd);
 
-            op->create_pipeline(opt_cpu);
+            op->create_pipeline(opt);
 
-            ncnn::Option opt;
-            opt.blob_allocator = int8_weight_data.allocator;
+            Option opt_q = opt;
+            opt_q.blob_allocator = int8_weight_data.allocator;
 
             const Mat weight_data_n = weight_data.range(weight_data_size_output * n, weight_data_size_output);
             Mat int8_weight_data_n = int8_weight_data.range(weight_data_size_output * n, weight_data_size_output);
-            op->forward(weight_data_n, int8_weight_data_n, opt);
+            op->forward(weight_data_n, int8_weight_data_n, opt_q);
 
             delete op;
         }
@@ -138,7 +132,7 @@ int Convolution::create_pipeline(const Option& opt)
 
             quantize->load_param(pd);
 
-            quantize->create_pipeline(opt_cpu);
+            quantize->create_pipeline(opt);
         }
 
         dequantize_ops.resize(num_output);
@@ -160,7 +154,7 @@ int Convolution::create_pipeline(const Option& opt)
 
             dequantize_ops[n]->load_param(pd);
 
-            dequantize_ops[n]->create_pipeline(opt_cpu);
+            dequantize_ops[n]->create_pipeline(opt);
 
             ncnn::Mat weights[1];
             weights[0] = bias_data.range(n, 1);
@@ -176,26 +170,23 @@ int Convolution::create_pipeline(const Option& opt)
 
 int Convolution::destroy_pipeline(const Option& opt)
 {
-    Option opt_cpu = opt;
-    opt_cpu.use_vulkan_compute = false;
-
     if (quantize)
     {
-        quantize->destroy_pipeline(opt_cpu);
+        quantize->destroy_pipeline(opt);
         delete quantize;
         quantize = 0;
     }
 
     for (int i=0; i<(int)dequantize_ops.size(); i++)
     {
-        dequantize_ops[i]->destroy_pipeline(opt_cpu);
+        dequantize_ops[i]->destroy_pipeline(opt);
         delete dequantize_ops[i];
     }
     dequantize_ops.clear();
 
     for (int i=0; i<(int)requantize_ops.size(); i++)
     {
-        requantize_ops[i]->destroy_pipeline(opt_cpu);
+        requantize_ops[i]->destroy_pipeline(opt);
         delete requantize_ops[i];
     }
     requantize_ops.clear();
@@ -289,9 +280,7 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob, const Option& op
 
             op->load_model(ModelBinFromMatArray(weights));
 
-            Option opt_cpu = opt;
-            opt_cpu.use_vulkan_compute = false;
-            op->create_pipeline(opt_cpu);
+            op->create_pipeline(opt);
 
             // forward
             op->forward(bottom_blob, top_blob, opt);
@@ -322,7 +311,7 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob, const Option& op
 
         // quantize, scale and round to nearest
         {
-            ncnn::Option opt_g = opt;
+            Option opt_g = opt;
             opt_g.blob_allocator = bottom_blob_int8.allocator;
 
             quantize->forward(bottom_blob, bottom_blob_int8, opt_g);
@@ -444,7 +433,7 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob, const Option& op
 
                 // requantize, reverse scale inplace
                 {
-                    ncnn::Option opt_g = opt;
+                    Option opt_g = opt;
                     opt_g.num_threads = 1;
                     opt_g.blob_allocator = top_blob.allocator;
 
@@ -510,7 +499,7 @@ int Convolution::forward(const Mat& bottom_blob, Mat& top_blob, const Option& op
 
                 // dequantize, reverse scale inplace
                 {
-                    ncnn::Option opt_g = opt;
+                    Option opt_g = opt;
                     opt_g.num_threads = 1;
                     opt_g.blob_allocator = top_blob.allocator;
 

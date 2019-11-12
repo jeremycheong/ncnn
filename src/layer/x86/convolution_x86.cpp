@@ -47,9 +47,6 @@ Convolution_x86::Convolution_x86()
 
 int Convolution_x86::create_pipeline(const Option& opt)
 {
-    Option opt_cpu = opt;
-    opt_cpu.use_vulkan_compute = false;
-
     if (activation_type == 1)
     {
         activation = ncnn::create_layer(ncnn::LayerType::ReLU);
@@ -84,7 +81,7 @@ int Convolution_x86::create_pipeline(const Option& opt)
 
     if (activation)
     {
-        activation->create_pipeline(opt_cpu);
+        activation->create_pipeline(opt);
     }
 
     use_winograd3x3 = false;
@@ -122,12 +119,9 @@ int Convolution_x86::create_pipeline(const Option& opt)
 
 int Convolution_x86::destroy_pipeline(const Option& opt)
 {
-    Option opt_cpu = opt;
-    opt_cpu.use_vulkan_compute = false;
-
     if (activation)
     {
-        activation->destroy_pipeline(opt_cpu);
+        activation->destroy_pipeline(opt);
         delete activation;
         activation = 0;
     }
@@ -235,7 +229,7 @@ int Convolution_x86::forwardDilation(const Mat& bottom_blob, Mat& top_blob, conv
                 }
             }
 
-            ncnn::Option opt_g = opt;
+            Option opt_g = opt;
             opt_g.blob_allocator = inner_top_blob.allocator;
             if (kernel_size == 7)
             {
@@ -482,7 +476,7 @@ int Convolution_x86::forward(const Mat& bottom_blob, Mat& top_blob, const Option
 
         // quantize, scale and round to nearest
         {
-            ncnn::Option opt_g = opt;
+            Option opt_g = opt;
             opt_g.blob_allocator = bottom_blob_int8.allocator;
 
             quantize->forward(bottom_blob, bottom_blob_int8, opt_g);
@@ -562,7 +556,7 @@ int Convolution_x86::forward(const Mat& bottom_blob, Mat& top_blob, const Option
                 #pragma omp parallel for num_threads(opt.num_threads)
                 for (int p=0; p<num_output; p++)
                 {
-                    ncnn::Option opt_g = opt;
+                    Option opt_g = opt;
                     opt_g.num_threads = 1;
                     opt_g.blob_allocator = top_blob.allocator;
 
@@ -589,7 +583,7 @@ int Convolution_x86::forward(const Mat& bottom_blob, Mat& top_blob, const Option
                 #pragma omp parallel for num_threads(opt.num_threads)
                 for (int p=0; p<num_output; p++)
                 {
-                    ncnn::Option opt_g = opt;
+                    Option opt_g = opt;
                     opt_g.num_threads = 1;
                     opt_g.blob_allocator = top_blob.allocator;
 

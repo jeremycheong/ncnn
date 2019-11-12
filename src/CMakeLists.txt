@@ -13,6 +13,7 @@ set(ncnn_SRCS
     blob.cpp
     command.cpp
     cpu.cpp
+    datareader.cpp
     gpu.cpp
     layer.cpp
     mat.cpp
@@ -88,8 +89,8 @@ macro(ncnn_add_layer class)
     if(WITH_LAYER_${name}_vulkan)
         set(layer_declaration "${layer_declaration}#include \"layer/vulkan/${name}_vulkan.h\"\n")
         set(layer_declaration_class "${layer_declaration_class}, virtual public ${class}_vulkan")
-        set(create_pipeline_content "${create_pipeline_content}        if (opt.use_vulkan_compute) { int ret = ${class}_vulkan::create_pipeline(opt); if (ret) return ret; }\n")
-        set(destroy_pipeline_content "        if (opt.use_vulkan_compute) { int ret = ${class}_vulkan::destroy_pipeline(opt); if (ret) return ret; }\n${destroy_pipeline_content}")
+        set(create_pipeline_content "${create_pipeline_content}        if (vkdev) { int ret = ${class}_vulkan::create_pipeline(opt); if (ret) return ret; }\n")
+        set(destroy_pipeline_content "        if (vkdev) { int ret = ${class}_vulkan::destroy_pipeline(opt); if (ret) return ret; }\n${destroy_pipeline_content}")
 
         file(GLOB_RECURSE SHADER_SRCS "layer/vulkan/shader/${name}.comp")
         file(GLOB_RECURSE SHADER_SUBSRCS "layer/vulkan/shader/${name}_*.comp")
@@ -299,18 +300,24 @@ if(NCNN_VULKAN)
     target_link_libraries(ncnn PUBLIC Vulkan::Vulkan)
 endif()
 
+if(WIN32)
+    target_compile_definitions(ncnn
+        PUBLIC NOMINMAX)
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC"
     OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_SIMULATE_ID MATCHES "MSVC"))
     target_compile_definitions(ncnn
-        PRIVATE _SCL_SECURE_NO_WARNINGS _CRT_SECURE_NO_DEPRECATE
-        PUBLIC NOMINMAX)
+        PRIVATE _SCL_SECURE_NO_WARNINGS _CRT_SECURE_NO_DEPRECATE)
 else()
     target_compile_options(ncnn
         PRIVATE -Wall -Wextra -Wno-unused-function)
-    set_target_properties(ncnn
-        PROPERTIES
-            POSITION_INDEPENDENT_CODE ON
-            INTERFACE_POSITION_INDEPENDENT_CODE ON)
+    if(NOT NCNN_DISABLE_PIC)
+        set_target_properties(ncnn
+            PROPERTIES
+                POSITION_INDEPENDENT_CODE ON
+                INTERFACE_POSITION_INDEPENDENT_CODE ON)
+    endif()
 
     if(CMAKE_BUILD_TYPE MATCHES "(Release|RELEASE|release)")
         if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
