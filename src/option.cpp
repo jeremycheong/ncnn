@@ -13,6 +13,7 @@
 // specific language governing permissions and limitations under the License.
 
 #include "option.h"
+
 #include "cpu.h"
 
 namespace ncnn {
@@ -33,7 +34,7 @@ Option::Option()
     use_winograd_convolution = true;
     use_sgemm_convolution = true;
     use_int8_inference = true;
-    use_vulkan_compute = false;// TODO enable me
+    use_vulkan_compute = false; // TODO enable me
 
     use_fp16_packed = true;
     use_fp16_storage = true;
@@ -44,6 +45,8 @@ Option::Option()
     use_packing_layout = true;
 
     use_shader_pack8 = false;
+
+    use_image_storage = false;
 
     use_bf16_storage = false;
 }

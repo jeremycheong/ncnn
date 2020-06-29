@@ -14,27 +14,27 @@
 
 #include "cpu.h"
 
+#include "platform.h"
+
 #include <limits.h>
-#include <stdio.h>
 #include <string.h>
-#include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 #ifdef __ANDROID__
+#include <stdint.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-#include <stdint.h>
 #endif
 
 #if __APPLE__
 #include "TargetConditionals.h"
 #if TARGET_OS_IPHONE
-#include <sys/types.h>
-#include <sys/sysctl.h>
 #include <mach/machine.h>
+#include <sys/sysctl.h>
+#include <sys/types.h>
 #define __IOS__ 1
 #endif
 #endif
@@ -52,13 +52,21 @@ static unsigned int get_elf_hwcap_from_proc_self_auxv()
         return 0;
     }
 
-#define AT_HWCAP 16
+#define AT_HWCAP  16
 #define AT_HWCAP2 26
 #if __aarch64__
 
-    struct { uint64_t tag; uint64_t value; } entry;
+    struct
+    {
+        uint64_t tag;
+        uint64_t value;
+    } entry;
 #else
-    struct { unsigned int tag; unsigned int value; } entry;
+    struct
+    {
+        unsigned int tag;
+        unsigned int value;
+    } entry;
 
 #endif
 
@@ -88,12 +96,12 @@ static unsigned int g_hwcaps = get_elf_hwcap_from_proc_self_auxv();
 
 #if __aarch64__
 // from arch/arm64/include/uapi/asm/hwcap.h
-#define HWCAP_ASIMD     (1 << 1)
-#define HWCAP_ASIMDHP   (1 << 10)
+#define HWCAP_ASIMD   (1 << 1)
+#define HWCAP_ASIMDHP (1 << 10)
 #else
 // from arch/arm/include/uapi/asm/hwcap.h
-#define HWCAP_NEON      (1 << 12)
-#define HWCAP_VFPv4     (1 << 16)
+#define HWCAP_NEON  (1 << 12)
+#define HWCAP_VFPv4 (1 << 16)
 #endif
 
 #endif // __ANDROID__
@@ -231,7 +239,7 @@ static int get_cpucount()
 
     if (count > (int)sizeof(size_t) * 8)
     {
-        fprintf(stderr, "more than %d cpu detected, thread affinity may not work properly :(\n", (int)sizeof(size_t) * 8);
+        NCNN_LOGE("more than %d cpu detected, thread affinity may not work properly :(", (int)sizeof(size_t) * 8);
     }
 
     return count;
@@ -321,16 +329,16 @@ static int set_sched_affinity(size_t thread_affinity_mask)
     // cpu_set_t definition
     // ref http://stackoverflow.com/questions/16319725/android-set-thread-affinity
 #define CPU_SETSIZE 1024
-#define __NCPUBITS  (8 * sizeof (unsigned long))
-typedef struct
-{
-    unsigned long __bits[CPU_SETSIZE / __NCPUBITS];
-} cpu_set_t;
+#define __NCPUBITS  (8 * sizeof(unsigned long))
+    typedef struct
+    {
+        unsigned long __bits[CPU_SETSIZE / __NCPUBITS];
+    } cpu_set_t;
 
-#define CPU_SET(cpu, cpusetp) \
-    ((cpusetp)->__bits[(cpu)/__NCPUBITS] |= (1UL << ((cpu) % __NCPUBITS)))
+#define NCNN_CPU_SET(cpu, cpusetp) \
+    ((cpusetp)->__bits[(cpu) / __NCPUBITS] |= (1UL << ((cpu) % __NCPUBITS)))
 
-#define CPU_ZERO(cpusetp) \
+#define NCNN_CPU_ZERO(cpusetp) \
     memset((cpusetp), 0, sizeof(cpu_set_t))
 
     // set affinity for thread
@@ -344,17 +352,19 @@ typedef struct
 #endif
 #endif
     cpu_set_t mask;
-    CPU_ZERO(&mask);
-    for (int i=0; i<(int)sizeof(size_t) * 8; i++)
+    NCNN_CPU_ZERO(&mask);
+    for (int i = 0; i < (int)sizeof(size_t) * 8; i++)
     {
-        if (thread_affinity_mask & (1 << i))
-            CPU_SET(i, &mask);
+        if (thread_affinity_mask & (1ul << i))
+        {
+            NCNN_CPU_SET(i, &mask);
+        }
     }
 
     int syscallret = syscall(__NR_sched_setaffinity, pid, sizeof(mask), &mask);
     if (syscallret)
     {
-        fprintf(stderr, "syscall error %d\n", syscallret);
+        NCNN_LOGE("syscall error %d", syscallret);
         return -1;
     }
 
@@ -373,7 +383,7 @@ int set_cpu_powersave(int powersave)
 {
     if (powersave < 0 || powersave > 2)
     {
-        fprintf(stderr, "powersave %d not supported\n", powersave);
+        NCNN_LOGE("powersave %d not supported", powersave);
         return -1;
     }
 
@@ -394,17 +404,17 @@ static size_t g_thread_affinity_mask_big = 0;
 
 static int setup_thread_affinity_masks()
 {
-    g_thread_affinity_mask_all = (1 << g_cpucount) - 1;
+    g_thread_affinity_mask_all = (1ul << g_cpucount) - 1;
 
 #ifdef __ANDROID__
     int max_freq_khz_min = INT_MAX;
     int max_freq_khz_max = 0;
     std::vector<int> cpu_max_freq_khz(g_cpucount);
-    for (int i=0; i<g_cpucount; i++)
+    for (int i = 0; i < g_cpucount; i++)
     {
         int max_freq_khz = get_max_freq_khz(i);
 
-//         fprintf(stderr, "%d max freq = %d khz\n", i, max_freq_khz);
+        //         NCNN_LOGE("%d max freq = %d khz", i, max_freq_khz);
 
         cpu_max_freq_khz[i] = max_freq_khz;
 
@@ -422,12 +432,12 @@ static int setup_thread_affinity_masks()
         return 0;
     }
 
-    for (int i=0; i<g_cpucount; i++)
+    for (int i = 0; i < g_cpucount; i++)
     {
         if (cpu_max_freq_khz[i] < max_freq_khz_medium)
-            g_thread_affinity_mask_little |= (1 << i);
+            g_thread_affinity_mask_little |= (1ul << i);
         else
-            g_thread_affinity_mask_big |= (1 << i);
+            g_thread_affinity_mask_big |= (1ul << i);
     }
 #else
     // TODO implement me for other platforms
@@ -461,7 +471,7 @@ size_t get_cpu_thread_affinity_mask(int powersave)
     if (powersave == 2)
         return g_thread_affinity_mask_big;
 
-    fprintf(stderr, "powersave %d not supported\n", powersave);
+    NCNN_LOGE("powersave %d not supported", powersave);
 
     // fallback to all cores anyway
     return g_thread_affinity_mask_all;
@@ -471,9 +481,9 @@ int set_cpu_thread_affinity(size_t thread_affinity_mask)
 {
 #ifdef __ANDROID__
     int num_threads = 0;
-    for (int i=0; i<(int)sizeof(size_t) * 8; i++)
+    for (int i = 0; i < (int)sizeof(size_t) * 8; i++)
     {
-        if (thread_affinity_mask & (1 << i))
+        if (thread_affinity_mask & (1ul << i))
             num_threads++;
     }
 
@@ -482,11 +492,11 @@ int set_cpu_thread_affinity(size_t thread_affinity_mask)
     set_omp_num_threads(num_threads);
     std::vector<int> ssarets(num_threads, 0);
     #pragma omp parallel for num_threads(num_threads)
-    for (int i=0; i<num_threads; i++)
+    for (int i = 0; i < num_threads; i++)
     {
         ssarets[i] = set_sched_affinity(thread_affinity_mask);
     }
-    for (int i=0; i<num_threads; i++)
+    for (int i = 0; i < num_threads; i++)
     {
         if (ssarets[i] != 0)
             return -1;

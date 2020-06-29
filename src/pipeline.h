@@ -15,11 +15,12 @@
 #ifndef NCNN_PIPELINE_H
 #define NCNN_PIPELINE_H
 
-#include "platform.h"
 #include "mat.h"
+#include "platform.h"
 #if NCNN_VULKAN
-#include <vulkan/vulkan.h>
 #include "gpu.h"
+
+#include <vulkan/vulkan.h>
 #endif // NCNN_VULKAN
 
 namespace ncnn {
@@ -41,15 +42,15 @@ public:
 
     int create(int shader_type_index, const Option& opt, const std::vector<vk_specialization_type>& specializations);
 
-    int create(VkShaderModule shader_module, const std::vector<vk_specialization_type>& specializations, int binding_count, int push_constant_count);
+    int create(VkShaderModule shader_module, const ShaderInfo& si, const std::vector<vk_specialization_type>& specializations);
 
     void destroy();
 
 protected:
-    int create_descriptorset_layout(int binding_count);
-    int create_pipeline_layout(int push_constant_count);
+    int create_descriptorset_layout();
+    int create_pipeline_layout();
     int create_pipeline(VkShaderModule shader_module, const std::vector<vk_specialization_type>& specializations);
-    int create_descriptor_update_template(int binding_count);
+    int create_descriptor_update_template();
 
 public:
     const VulkanDevice* vkdev;
@@ -64,6 +65,8 @@ public:
     VkPipeline pipeline;
 
     VkDescriptorUpdateTemplateKHR descriptor_update_template;
+
+    ShaderInfo shader_info;
 
     uint32_t local_size_x;
     uint32_t local_size_y;

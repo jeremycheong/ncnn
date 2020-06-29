@@ -80,7 +80,7 @@ public:
 
     // enable options for gpu inference
     bool use_fp16_packed;
-    bool use_fp16_storage;
+    bool use_fp16_storage; //Also used for fp16 weight storage in AVX
     bool use_fp16_arithmetic;
     bool use_int8_storage;
     bool use_int8_arithmetic;
@@ -92,6 +92,9 @@ public:
     bool use_packing_layout;
 
     bool use_shader_pack8;
+
+    // turn on for adreno
+    bool use_image_storage;
 
     // enable bf16 data type for storage
     // improve most operator performace on all arm devices, may consume more memory

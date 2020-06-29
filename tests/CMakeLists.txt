@@ -1,19 +1,26 @@
 
+macro(ncnn_add_test name)
+    add_executable(test_${name} test_${name}.cpp)
+    target_link_libraries(test_${name} PRIVATE ncnn)
+    add_test(test_${name} test_${name})
+
+    # add test to a virtual project group
+    set_property(TARGET test_${name} PROPERTY FOLDER "tests")
+endmacro()
+
 macro(ncnn_add_layer_test class)
     string(TOLOWER ${class} name)
 
     # enable if WITH_LAYER_xxx option ON
     if(${WITH_LAYER_${name}})
-        add_executable(test_${name} test_${name}.cpp)
-        target_link_libraries(test_${name} PRIVATE ncnn)
-        add_test(test_${name} test_${name})
-
-        # add test to a virtual project group
-        set_property(TARGET test_${name} PROPERTY FOLDER "tests")
+        ncnn_add_test(${name})
     endif()
 endmacro()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../src/layer)
+
+ncnn_add_test(mat_pixel_rotate)
 
 ncnn_add_layer_test(AbsVal)
 ncnn_add_layer_test(BatchNorm)
@@ -37,6 +44,8 @@ ncnn_add_layer_test(InnerProduct)
 ncnn_add_layer_test(InstanceNorm)
 ncnn_add_layer_test(Interp)
 ncnn_add_layer_test(LRN)
+ncnn_add_layer_test(MemoryData)
+ncnn_add_layer_test(Noop)
 ncnn_add_layer_test(Normalize)
 ncnn_add_layer_test(Packing)
 ncnn_add_layer_test(Padding)
@@ -44,7 +53,9 @@ ncnn_add_layer_test(Permute)
 ncnn_add_layer_test(PixelShuffle)
 ncnn_add_layer_test(Pooling)
 ncnn_add_layer_test(PReLU)
+ncnn_add_layer_test(PriorBox)
 ncnn_add_layer_test(ROIPooling)
+ncnn_add_layer_test(ROIAlign)
 ncnn_add_layer_test(ReLU)
 ncnn_add_layer_test(Reorg)
 ncnn_add_layer_test(Reshape)
@@ -55,3 +66,5 @@ ncnn_add_layer_test(Slice)
 ncnn_add_layer_test(Softmax)
 ncnn_add_layer_test(TanH)
 ncnn_add_layer_test(UnaryOp)
+ncnn_add_layer_test(Mish)
+ncnn_add_layer_test(Swish)

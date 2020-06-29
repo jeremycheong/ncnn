@@ -1,7 +1,6 @@
 
 macro(ncnn_add_example name)
     add_executable(${name} ${name}.cpp)
-    target_compile_options(${name} PRIVATE -std=c++11)
     target_link_libraries(${name} PRIVATE ncnn ${OpenCV_LIBS})
 
     # add test to a virtual project group
@@ -18,6 +17,7 @@ if(OpenCV_FOUND)
     include_directories(${CMAKE_CURRENT_BINARY_DIR}/../src)
 
     ncnn_add_example(squeezenet)
+    ncnn_add_example(squeezenet_c_api)
     ncnn_add_example(fasterrcnn)
     ncnn_add_example(rfcn)
     ncnn_add_example(yolov2)
