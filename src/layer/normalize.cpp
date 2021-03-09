@@ -14,12 +14,9 @@
 
 #include "normalize.h"
 
-#include <algorithm>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(Normalize)
 
 Normalize::Normalize()
 {

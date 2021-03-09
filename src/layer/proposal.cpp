@@ -14,12 +14,9 @@
 
 #include "proposal.h"
 
-#include <algorithm>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(Proposal)
 
 Proposal::Proposal()
 {

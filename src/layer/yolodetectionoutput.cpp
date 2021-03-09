@@ -16,12 +16,9 @@
 
 #include "layer_type.h"
 
-#include <algorithm>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(YoloDetectionOutput)
 
 YoloDetectionOutput::YoloDetectionOutput()
 {

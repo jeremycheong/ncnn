@@ -14,12 +14,9 @@
 
 #include "psroipooling.h"
 
-#include <algorithm>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(PSROIPooling)
 
 PSROIPooling::PSROIPooling()
 {

@@ -16,11 +16,7 @@
 
 #include "layer_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(InnerProduct)
 
 InnerProduct::InnerProduct()
 {
@@ -36,6 +32,11 @@ int InnerProduct::load_param(const ParamDict& pd)
     int8_scale_term = pd.get(8, 0);
     activation_type = pd.get(9, 0);
     activation_params = pd.get(10, Mat());
+
+    if (int8_scale_term)
+    {
+        use_int8_inference = true;
+    }
 
     return 0;
 }
@@ -93,14 +94,77 @@ int InnerProduct::forward(const Mat& bottom_blob, Mat& top_blob, const Option& o
 {
     if (opt.use_int8_inference && weight_data.elemsize == (size_t)1u)
     {
-        return forward_int8(bottom_blob, top_blob, opt);
+        return InnerProduct::forward_int8(bottom_blob, top_blob, opt);
     }
+
+    const int num_input = weight_data_size / num_output;
 
     int w = bottom_blob.w;
     int h = bottom_blob.h;
     int channels = bottom_blob.c;
     size_t elemsize = bottom_blob.elemsize;
     int size = w * h;
+
+    if (bottom_blob.dims == 2 && w == num_input && h > 1)
+    {
+        // gemm
+        top_blob.create(num_output, h, elemsize, opt.blob_allocator);
+        if (top_blob.empty())
+            return -100;
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int j = 0; j < h; j++)
+        {
+            const float* m = bottom_blob.row(j);
+            float* outptr = top_blob.row(j);
+
+            for (int p = 0; p < num_output; p++)
+            {
+                const float* kptr = (const float*)weight_data + w * p;
+
+                float sum = 0.f;
+
+                if (bias_term)
+                    sum = bias_data[p];
+
+                for (int i = 0; i < w; i++)
+                {
+                    sum += m[i] * kptr[i];
+                }
+
+                if (activation_type == 1)
+                {
+                    sum = std::max(sum, 0.f);
+                }
+                else if (activation_type == 2)
+                {
+                    float slope = activation_params[0];
+                    sum = sum > 0.f ? sum : sum * slope;
+                }
+                else if (activation_type == 3)
+                {
+                    float min = activation_params[0];
+                    float max = activation_params[1];
+                    if (sum < min)
+                        sum = min;
+                    if (sum > max)
+                        sum = max;
+                }
+                else if (activation_type == 4)
+                {
+                    sum = static_cast<float>(1.f / (1.f + exp(-sum)));
+                }
+                else if (activation_type == 5)
+                {
+                    sum = static_cast<float>(sum * tanh(log(exp(sum) + 1.f)));
+                }
+
+                outptr[p] = sum;
+            }
+        }
+
+        return 0;
+    }
 
     top_blob.create(num_output, elemsize, opt.blob_allocator);
     if (top_blob.empty())
@@ -148,6 +212,10 @@ int InnerProduct::forward(const Mat& bottom_blob, Mat& top_blob, const Option& o
         {
             sum = static_cast<float>(1.f / (1.f + exp(-sum)));
         }
+        else if (activation_type == 5)
+        {
+            sum = static_cast<float>(sum * tanh(log(exp(sum) + 1.f)));
+        }
 
         top_blob[p] = sum;
     }
@@ -157,6 +225,8 @@ int InnerProduct::forward(const Mat& bottom_blob, Mat& top_blob, const Option& o
 
 int InnerProduct::forward_int8(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const
 {
+    const int num_input = weight_data_size / num_output;
+
     int w = bottom_blob.w;
     int h = bottom_blob.h;
     int channels = bottom_blob.c;
@@ -172,6 +242,53 @@ int InnerProduct::forward_int8(const Mat& bottom_blob, Mat& top_blob, const Opti
         quantize_float32_to_int8(bottom_blob, bottom_blob_tm, bottom_blob_int8_scale, opt_g);
     }
 
+    if (bottom_blob.dims == 2 && w == num_input && h > 1)
+    {
+        // gemm
+        top_blob.create(num_output, h, 4u, opt.blob_allocator);
+        if (top_blob.empty())
+            return -100;
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int j = 0; j < h; j++)
+        {
+            const signed char* m = bottom_blob_tm.row<signed char>(j);
+            const signed char* kptr = weight_data;
+            float* outptr = top_blob.row(j);
+
+            for (int p = 0; p < num_output; p++)
+            {
+                int sum = 0;
+
+                for (int i = 0; i < w; i++)
+                {
+                    sum += m[i] * kptr[i];
+                }
+
+                // dequantize and relu
+                float scale_in;
+                if (weight_data_int8_scales[p] == 0)
+                    scale_in = 0;
+                else
+                    scale_in = 1.f / (bottom_blob_int8_scale * weight_data_int8_scales[p]);
+
+                float sumfp32 = sum * scale_in;
+
+                if (bias_term)
+                    sumfp32 += bias_data[p];
+
+                if (activation_type == 1)
+                {
+                    sumfp32 = std::max(sumfp32, 0.f);
+                }
+
+                outptr[p] = sumfp32;
+            }
+        }
+
+        return 0;
+    }
+
     top_blob.create(num_output, 4u, opt.blob_allocator);
     if (top_blob.empty())
         return -100;
@@ -184,10 +301,11 @@ int InnerProduct::forward_int8(const Mat& bottom_blob, Mat& top_blob, const Opti
 
         int sum = 0;
 
+        int offset = size * channels * p;
         // channels
         for (int q = 0; q < channels; q++)
         {
-            const signed char* w = (const signed char*)weight_data + size * channels * p + size * q;
+            const signed char* w = (const signed char*)weight_data + offset + size * q;
             const signed char* m = bottom_blob_tm.channel(q);
 
             for (int i = 0; i < size; i++)

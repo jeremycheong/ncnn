@@ -14,14 +14,11 @@
 
 #include "reduction.h"
 
-#include <algorithm>
 #include <float.h>
 #include <limits.h>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(Reduction)
 
 Reduction::Reduction()
 {

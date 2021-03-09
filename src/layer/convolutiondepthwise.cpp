@@ -16,11 +16,7 @@
 
 #include "layer_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(ConvolutionDepthWise)
 
 ConvolutionDepthWise::ConvolutionDepthWise()
 {
@@ -55,6 +51,11 @@ int ConvolutionDepthWise::load_param(const ParamDict& pd)
     {
         // reject invalid group
         return -100;
+    }
+
+    if (int8_scale_term)
+    {
+        use_int8_inference = true;
     }
 
     return 0;

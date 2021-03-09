@@ -17,11 +17,7 @@
 #include "layer_shader_type.h"
 #include "layer_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(ConvolutionDepthWise_vulkan)
 
 ConvolutionDepthWise_vulkan::ConvolutionDepthWise_vulkan()
 {

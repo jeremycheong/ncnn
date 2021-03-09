@@ -11,21 +11,23 @@
 // under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
-#if __AVX__
-#include <immintrin.h>
-#endif // __AVX__
 
 #include "clip_x86.h"
 
-namespace ncnn {
+#if __SSE2__
+#include <emmintrin.h>
+#if __AVX__
+#include <immintrin.h>
+#endif // __AVX__
+#endif // __SSE2__
 
-DEFINE_LAYER_CREATOR(Clip_x86)
+namespace ncnn {
 
 Clip_x86::Clip_x86()
 {
-#if __AVX__
+#if __SSE2__
     support_packing = true;
-#endif // __AVX__
+#endif // __SSE2__
 }
 
 int Clip_x86::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
@@ -34,6 +36,7 @@ int Clip_x86::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
     int h = bottom_top_blob.h;
     int channels = bottom_top_blob.c;
     int size = w * h;
+#if __SSE2__
     int elempack = bottom_top_blob.elempack;
 
 #if __AVX__
@@ -62,6 +65,31 @@ int Clip_x86::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
     }
 #endif // __AVX__
 
+    if (elempack == 4)
+    {
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q = 0; q < channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+
+            __m128 _max = _mm_set1_ps(max);
+            __m128 _min = _mm_set1_ps(min);
+
+            for (int i = 0; i < size; i++)
+            {
+                __m128 _ptr = _mm_loadu_ps(ptr);
+                _ptr = _mm_max_ps(_ptr, _min);
+                _ptr = _mm_min_ps(_ptr, _max);
+                _mm_storeu_ps(ptr, _ptr);
+
+                ptr += 4;
+            }
+        }
+
+        return 0;
+    }
+#endif // __SSE2__
+
     #pragma omp parallel for num_threads(opt.num_threads)
     for (int q = 0; q < channels; q++)
     {
@@ -82,4 +110,5 @@ int Clip_x86::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
 
     return 0;
 }
+
 } //namespace ncnn

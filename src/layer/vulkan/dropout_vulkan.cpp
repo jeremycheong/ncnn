@@ -16,11 +16,7 @@
 
 #include "layer_shader_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(Dropout_vulkan)
 
 Dropout_vulkan::Dropout_vulkan()
 {

@@ -16,11 +16,7 @@
 
 #include "layer_shader_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(DeepCopy_vulkan)
 
 DeepCopy_vulkan::DeepCopy_vulkan()
 {

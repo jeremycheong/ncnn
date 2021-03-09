@@ -17,12 +17,9 @@
 #include "layer_shader_type.h"
 #include "platform.h"
 
-#include <algorithm>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(PriorBox_vulkan)
 
 PriorBox_vulkan::PriorBox_vulkan()
 {

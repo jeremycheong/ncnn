@@ -14,12 +14,9 @@
 
 #include "argmax.h"
 
-#include <algorithm>
 #include <functional>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(ArgMax)
 
 ArgMax::ArgMax()
 {

@@ -17,11 +17,7 @@
 #include "layer_shader_type.h"
 #include "layer_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(DeconvolutionDepthWise_vulkan)
 
 DeconvolutionDepthWise_vulkan::DeconvolutionDepthWise_vulkan()
 {
@@ -714,7 +710,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkMat& bottom_blob, VkMat& top_
                 crop_params[2] = 0;
                 crop_params[3] = top_blob_bordered_adj.w - wcut;
                 crop_params[4] = top_blob_bordered_adj.h - hcut;
-                crop_params[5] = top_blob_bordered_adj.c;
+                crop_params[5] = top_blob_bordered_adj.c * out_elempack;
             }
             else if (pad_left == -234 || pad_right == -234 || pad_top == -234 || pad_bottom == -234)
             {
@@ -724,7 +720,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkMat& bottom_blob, VkMat& top_
                 crop_params[2] = 0;
                 crop_params[3] = top_blob_bordered_adj.w - wcut;
                 crop_params[4] = top_blob_bordered_adj.h - hcut;
-                crop_params[5] = top_blob_bordered_adj.c;
+                crop_params[5] = top_blob_bordered_adj.c * out_elempack;
             }
 
             std::vector<VkMat> crop_inputs(2);
@@ -915,7 +911,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkMat& bottom_blob, VkMat& top_
             crop_params[2] = 0;
             crop_params[3] = top_blob_bordered_adj.w - wcut;
             crop_params[4] = top_blob_bordered_adj.h - hcut;
-            crop_params[5] = top_blob_bordered_adj.c;
+            crop_params[5] = top_blob_bordered_adj.c * out_elempack;
         }
         else if (pad_left == -234 || pad_right == -234 || pad_top == -234 || pad_bottom == -234)
         {
@@ -925,7 +921,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkMat& bottom_blob, VkMat& top_
             crop_params[2] = 0;
             crop_params[3] = top_blob_bordered_adj.w - wcut;
             crop_params[4] = top_blob_bordered_adj.h - hcut;
-            crop_params[5] = top_blob_bordered_adj.c;
+            crop_params[5] = top_blob_bordered_adj.c * out_elempack;
         }
 
         std::vector<VkMat> crop_inputs(2);
@@ -1079,7 +1075,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkImageMat& bottom_blob, VkImag
                 crop_params[2] = 0;
                 crop_params[3] = top_blob_bordered_adj.w - wcut;
                 crop_params[4] = top_blob_bordered_adj.h - hcut;
-                crop_params[5] = top_blob_bordered_adj.c;
+                crop_params[5] = top_blob_bordered_adj.c * out_elempack;
             }
             else if (pad_left == -234 || pad_right == -234 || pad_top == -234 || pad_bottom == -234)
             {
@@ -1089,7 +1085,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkImageMat& bottom_blob, VkImag
                 crop_params[2] = 0;
                 crop_params[3] = top_blob_bordered_adj.w - wcut;
                 crop_params[4] = top_blob_bordered_adj.h - hcut;
-                crop_params[5] = top_blob_bordered_adj.c;
+                crop_params[5] = top_blob_bordered_adj.c * out_elempack;
             }
 
             std::vector<VkImageMat> crop_inputs(2);
@@ -1280,7 +1276,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkImageMat& bottom_blob, VkImag
             crop_params[2] = 0;
             crop_params[3] = top_blob_bordered_adj.w - wcut;
             crop_params[4] = top_blob_bordered_adj.h - hcut;
-            crop_params[5] = top_blob_bordered_adj.c;
+            crop_params[5] = top_blob_bordered_adj.c * out_elempack;
         }
         else if (pad_left == -234 || pad_right == -234 || pad_top == -234 || pad_bottom == -234)
         {
@@ -1290,7 +1286,7 @@ int DeconvolutionDepthWise_vulkan::forward(const VkImageMat& bottom_blob, VkImag
             crop_params[2] = 0;
             crop_params[3] = top_blob_bordered_adj.w - wcut;
             crop_params[4] = top_blob_bordered_adj.h - hcut;
-            crop_params[5] = top_blob_bordered_adj.c;
+            crop_params[5] = top_blob_bordered_adj.c * out_elempack;
         }
 
         std::vector<VkImageMat> crop_inputs(2);

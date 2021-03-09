@@ -16,11 +16,7 @@
 
 #include "layer_shader_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(Cast_vulkan)
 
 Cast_vulkan::Cast_vulkan()
 {

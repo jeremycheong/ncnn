@@ -14,11 +14,7 @@
 
 #include "relu.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(ReLU)
 
 ReLU::ReLU()
 {

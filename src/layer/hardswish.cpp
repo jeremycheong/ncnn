@@ -14,11 +14,7 @@
 
 #include "hardswish.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(HardSwish)
 
 HardSwish::HardSwish()
 {

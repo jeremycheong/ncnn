@@ -26,6 +26,7 @@ class MXNetNode
 {
 public:
     bool has_attr(const char* key) const;
+    bool is_attr_scalar(const char* key) const;
 
     class AttrProxy
     {
@@ -102,6 +103,18 @@ bool MXNetNode::has_attr(const char* key) const
     return it != attrs.end();
 }
 
+bool MXNetNode::is_attr_scalar(const char* key) const
+{
+    const std::map<std::string, std::string>::const_iterator it = attrs.find(key);
+    if (it == attrs.end())
+        return false;
+
+    if (it->second.empty())
+        return false;
+
+    return it->second[0] != '(';
+}
+
 int MXNetNode::attr_i(const char* key) const
 {
     const std::map<std::string, std::string>::const_iterator it = attrs.find(key);
@@ -154,10 +167,16 @@ std::vector<int> MXNetNode::attr_ai(const char* key) const
     // (1,2,3)
     std::vector<int> list;
 
+    if (is_attr_scalar(key))
+    {
+        list.push_back(attr_i(key));
+        return list;
+    }
+
     int i = 0;
     int c = 0;
     int nconsumed = 0;
-    int nscan = sscanf(it->second.c_str() + c, "%*[\[(,]%d%n", &i, &nconsumed);
+    int nscan = sscanf(it->second.c_str() + c, "%*[\\[(,]%d%n", &i, &nconsumed);
     if (nscan != 1)
     {
         // (None
@@ -200,6 +219,12 @@ std::vector<float> MXNetNode::attr_af(const char* key) const
     // (0.1,0.2,0.3)
     std::vector<float> list;
 
+    if (is_attr_scalar(key))
+    {
+        list.push_back(attr_f(key));
+        return list;
+    }
+
     float i = 0.f;
     int c = 0;
     int nconsumed = 0;
@@ -234,12 +259,12 @@ bool MXNetNode::has_weight(int i) const
     if (i < 0 || i >= (int)weights.size())
         return false;
 
-    const std::string& name = (*nodes)[weights[i]].name;
+    const std::string& node_name = (*nodes)[weights[i]].name;
 
-    for (int i = 0; i < (int)(*params).size(); i++)
+    for (int j = 0; j < (int)(*params).size(); j++)
     {
-        const MXNetParam& p = (*params)[i];
-        if (p.name == name)
+        const MXNetParam& p = (*params)[j];
+        if (p.name == node_name)
             return true;
     }
 
@@ -251,12 +276,12 @@ std::vector<float> MXNetNode::weight(int i, int init_len) const
     if (i < 0 || i >= (int)weights.size())
         return std::vector<float>();
 
-    const std::string& name = (*nodes)[weights[i]].name;
+    const std::string& node_name = (*nodes)[weights[i]].name;
 
-    for (int i = 0; i < (int)(*params).size(); i++)
+    for (int j = 0; j < (int)(*params).size(); j++)
     {
-        const MXNetParam& p = (*params)[i];
-        if (p.name != name)
+        const MXNetParam& p = (*params)[j];
+        if (p.name != node_name)
             continue;
 
         if (!p.data.empty())
@@ -355,8 +380,8 @@ static bool read_mxnet_json(const char* jsonpath, std::vector<MXNetNode>& nodes)
     bool in_inputs_block = false;
     while (!feof(fp))
     {
-        char* s = fgets(line, 1024, fp);
-        if (!s)
+        char* t = fgets(line, 1024, fp);
+        if (!t)
             break;
 
         if (in_inputs_block)
@@ -972,7 +997,7 @@ int main(int argc, char** argv)
     // global definition line
     // [layer count] [blob count]
     std::set<std::string> blob_names;
-    for (int i = 0; i < node_count; i++)
+    for (size_t i = 0; i < node_count; i++)
     {
         MXNetNode& n = nodes[i];
 
@@ -1117,7 +1142,7 @@ int main(int argc, char** argv)
 
     int internal_split = 0;
 
-    for (int i = 0; i < node_count; i++)
+    for (size_t i = 0; i < node_count; i++)
     {
         const MXNetNode& n = nodes[i];
 
@@ -1286,6 +1311,10 @@ int main(int argc, char** argv)
             {
                 fprintf(pp, "%-16s", "Deconvolution");
             }
+        }
+        else if (n.op == "dot")
+        {
+            fprintf(pp, "%-16s", "Gemm");
         }
         else if (n.op == "Dropout")
         {
@@ -1912,6 +1941,36 @@ int main(int argc, char** argv)
             fwrite(weight_data.data(), sizeof(float), weight_data.size(), bp);
             fwrite(bias_data.data(), sizeof(float), bias_data.size(), bp);
         }
+        else if (n.op == "cos")
+        {
+            int op_type = 10;
+            fprintf(pp, " 0=%d", op_type);
+        }
+        else if (n.op == "Crop")
+        {
+            int num_args = n.attr("num_args");
+            std::vector<int> offset = n.attr("offset");
+
+            int woffset = 0;
+            int hoffset = 0;
+            if (offset.size() == 2)
+            {
+                woffset = offset[1];
+                hoffset = offset[0];
+            }
+
+            fprintf(pp, " 0=%d", woffset);
+            fprintf(pp, " 1=%d", hoffset);
+            fprintf(pp, " 2=0");
+
+            if (num_args == 1)
+            {
+                std::vector<int> h_w = n.attr("h_w");
+                fprintf(pp, " 3=%d", h_w[1]);
+                fprintf(pp, " 4=%d", h_w[0]);
+                fprintf(pp, " 5=0");
+            }
+        }
         else if (n.op == "Deconvolution")
         {
             int num_filter = n.attr("num_filter");
@@ -2031,35 +2090,14 @@ int main(int argc, char** argv)
 
             fwrite(bias_data.data(), sizeof(float), bias_data.size(), bp);
         }
-        else if (n.op == "cos")
+        else if (n.op == "dot")
         {
-            int op_type = 10;
-            fprintf(pp, " 0=%d", op_type);
-        }
-        else if (n.op == "Crop")
-        {
-            int num_args = n.attr("num_args");
-            std::vector<int> offset = n.attr("offset");
-
-            int woffset = 0;
-            int hoffset = 0;
-            if (offset.size() == 2)
-            {
-                woffset = offset[1];
-                hoffset = offset[0];
-            }
-
-            fprintf(pp, " 0=%d", woffset);
-            fprintf(pp, " 1=%d", hoffset);
-            fprintf(pp, " 2=0");
-
-            if (num_args == 1)
-            {
-                std::vector<int> h_w = n.attr("h_w");
-                fprintf(pp, " 3=%d", h_w[1]);
-                fprintf(pp, " 4=%d", h_w[0]);
-                fprintf(pp, " 5=0");
-            }
+            int transpose_a = n.attr("transpose_a");
+            int transpose_b = n.attr("transpose_b");
+            fprintf(pp, " 0=1.0"); // alpha
+            fprintf(pp, " 1=1.0"); // beta
+            fprintf(pp, " 2=%d", transpose_a);
+            fprintf(pp, " 3=%d", transpose_b);
         }
         else if (n.op == "Dropout")
         {
@@ -2263,11 +2301,11 @@ int main(int argc, char** argv)
                 // if axis set, reduce according to axis
                 fprintf(pp, " 1=%d", 0);
                 fprintf(pp, " -23303=%zd", axis.size());
-                for (int i = 0; i < axis.size(); i++)
+                for (size_t j = 0; j < axis.size(); j++)
                 {
-                    if (axis[i] == 0 || axis[i] > 3 || axis[i] < -3)
+                    if (axis[j] == 0 || axis[j] > 3 || axis[j] < -3)
                         fprintf(stderr, "Unsupported reduction axis !\n");
-                    fprintf(pp, ",%d", axis[i]);
+                    fprintf(pp, ",%d", axis[j]);
                 }
             }
             fprintf(pp, " 4=%d", keepdims);
@@ -2466,21 +2504,21 @@ int main(int argc, char** argv)
                 step.erase(step.begin());
 
             // assert step == 1
-            for (int i = 0; i < (int)step.size(); i++)
+            for (size_t j = 0; j < step.size(); j++)
             {
-                if (step[i] != 1)
+                if (step[j] != 1)
                     fprintf(stderr, "Unsupported slice step !\n");
             }
 
             fprintf(pp, " -23309=%d", (int)begin.size());
-            for (int i = 0; i < (int)begin.size(); i++)
+            for (size_t j = 0; j < begin.size(); j++)
             {
-                fprintf(pp, ",%d", begin[i]);
+                fprintf(pp, ",%d", begin[j]);
             }
             fprintf(pp, " -23310=%d", (int)end.size());
-            for (int i = 0; i < (int)end.size(); i++)
+            for (size_t j = 0; j < end.size(); j++)
             {
-                fprintf(pp, ",%d", end[i]);
+                fprintf(pp, ",%d", end[j]);
             }
         }
         else if (n.op == "slice_axis")
@@ -2554,9 +2592,9 @@ int main(int argc, char** argv)
             else
             {
                 fprintf(pp, " -23303=%zd", axis.size());
-                for (int i = 0; i < (int)axis.size(); i++)
+                for (size_t j = 0; j < axis.size(); j++)
                 {
-                    fprintf(pp, ",%d", axis[i]);
+                    fprintf(pp, ",%d", axis[j]);
                 }
             }
         }
@@ -2656,11 +2694,11 @@ int main(int argc, char** argv)
         else
         {
             // TODO op specific params
-            std::map<std::string, std::string>::const_iterator it = n.attrs.begin();
-            for (; it != n.attrs.end(); it++)
+            std::map<std::string, std::string>::const_iterator attr_it = n.attrs.begin();
+            for (; attr_it != n.attrs.end(); attr_it++)
             {
-                fprintf(stderr, "# %s=%s\n", it->first.c_str(), it->second.c_str());
-                //                 fprintf(pp, " %s=%s", it->first.c_str(), it->second.c_str());
+                fprintf(stderr, "# %s=%s\n", attr_it->first.c_str(), attr_it->second.c_str());
+                //                 fprintf(pp, " %s=%s", attr_it->first.c_str(), attr_it->second.c_str());
             }
         }
 

@@ -11,23 +11,25 @@
 // under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
+
+#include "mish_x86.h"
+
+#if __SSE2__
+#include "sse_activation.h"
 #if __AVX__
 #include "avx_activation.h"
 #endif // __AVX__
-
-#include "mish_x86.h"
+#endif // __SSE2__
 
 #include <math.h>
 
 namespace ncnn {
 
-DEFINE_LAYER_CREATOR(Mish_x86)
-
 Mish_x86::Mish_x86()
 {
-#if __AVX__
+#if __SSE2__
     support_packing = true;
-#endif // __AVX__
+#endif // __SSE2__
 }
 
 int Mish_x86::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
@@ -36,7 +38,9 @@ int Mish_x86::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
     int h = bottom_top_blob.h;
     int channels = bottom_top_blob.c;
     int size = w * h;
+#if __SSE2__
     int elempack = bottom_top_blob.elempack;
+
 #if __AVX__
     if (elempack == 8)
     {
@@ -58,13 +62,51 @@ int Mish_x86::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
     }
 #endif // __AVX__
 
+    if (elempack == 4)
+    {
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int q = 0; q < channels; q++)
+        {
+            float* ptr = bottom_top_blob.channel(q);
+
+            for (int i = 0; i < size; i++)
+            {
+                __m128 _p = _mm_loadu_ps(ptr);
+                _p = mish_sse(_p);
+                _mm_storeu_ps(ptr, _p);
+                ptr += 4;
+            }
+        }
+
+        return 0;
+    }
+#endif // __SSE2__
+
     #pragma omp parallel for num_threads(opt.num_threads)
     for (int q = 0; q < channels; q++)
     {
         float* ptr = bottom_top_blob.channel(q);
 
-        int remain = size;
-        for (; remain > 0; remain--)
+        int i = 0;
+#if __SSE2__
+#if __AVX__
+        for (; i + 7 < size; i += 8)
+        {
+            __m256 _p = _mm256_loadu_ps(ptr);
+            _p = mish_avx(_p);
+            _mm256_storeu_ps(ptr, _p);
+            ptr += 8;
+        }
+#endif // __AVX__
+        for (; i + 3 < size; i += 4)
+        {
+            __m128 _p = _mm_loadu_ps(ptr);
+            _p = mish_sse(_p);
+            _mm_storeu_ps(ptr, _p);
+            ptr += 4;
+        }
+#endif // __SSE2__
+        for (; i < size; i++)
         {
             *ptr = *ptr * tanh(log(exp(*ptr) + 1.f));
             ptr++;

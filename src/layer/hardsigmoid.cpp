@@ -14,11 +14,7 @@
 
 #include "hardsigmoid.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(HardSigmoid)
 
 HardSigmoid::HardSigmoid()
 {

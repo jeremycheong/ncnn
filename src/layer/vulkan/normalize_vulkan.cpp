@@ -16,11 +16,7 @@
 
 #include "layer_shader_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(Normalize_vulkan)
 
 Normalize_vulkan::Normalize_vulkan()
 {

@@ -34,6 +34,17 @@ void file_error(const char* s)
     exit(EXIT_FAILURE);
 }
 
+void fread_or_error(void* buffer, size_t size, size_t count, FILE* fp, const char* s)
+{
+    if (count != fread(buffer, size, count, fp))
+    {
+        fprintf(stderr, "Couldn't read from file: %s\n", s);
+        fclose(fp);
+        assert(0);
+        exit(EXIT_FAILURE);
+    }
+}
+
 void error(const char* s)
 {
     perror(s);
@@ -54,6 +65,7 @@ typedef struct Section
     std::string activation;
     int from, reverse;
     std::vector<int> layers, mask, anchors;
+    int group_id = -1;
     int classes = 0, num = 0;
     float ignore_thresh = 0.45f, scale_x_y = 1.f;
 
@@ -144,6 +156,7 @@ void update_field(Section* section, std::string key, std::string value)
         {"reverse", INT, FIELD_OFFSET(reverse)},
         //route
         {"layers", IARRAY, FIELD_OFFSET(layers)},
+        {"group_id", INT, FIELD_OFFSET(group_id)},
         //yolo
         {"mask", IARRAY, FIELD_OFFSET(mask)},
         {"anchors", IARRAY, FIELD_OFFSET(anchors)},
@@ -465,12 +478,12 @@ void parse_cfg(std::deque<Section*>& dnet, int merge_output)
         else if (s->name == "maxpool")
         {
             if (s->padding == -1)
-                s->padding = s->size - 1;
+                s->padding = s->stride * int((s->size - 1) / 2);
             s->h = p->out_h;
             s->w = p->out_w;
             s->c = p->out_c;
             s->out_h = (s->h + s->padding - s->size) / s->stride + 1;
-            s->out_w = s->out_h;
+            s->out_w = (s->w + s->padding - s->size) / s->stride + 1;
             s->out_c = s->c;
 
 #if OUTPUT_LAYER_MAP
@@ -483,6 +496,8 @@ void parse_cfg(std::deque<Section*>& dnet, int merge_output)
             s->param.push_back(format("1=%d", s->size));     //kernel_w
             s->param.push_back(format("2=%d", s->stride));   //stride_w
             s->param.push_back("5=1");                       //pad_mode=SAME_UPPER
+            s->param.push_back(format("3=%d", s->padding));  //pad_left
+            s->param.push_back(format("13=%d", s->padding)); //pad_top
             s->param.push_back(format("14=%d", s->padding)); //pad_right
             s->param.push_back(format("15=%d", s->padding)); //pad_bottom
         }
@@ -571,14 +586,31 @@ void parse_cfg(std::deque<Section*>& dnet, int merge_output)
                 for (auto blob : q->real_output_blobs)
                     s->input_blobs.push_back(blob);
             }
+            if (s->input_blobs.size() == 1)
+            {
+                if (s->groups <= 1 || s->group_id == -1)
+                    s->layer_type = "Noop";
+                else
+                {
+                    s->out_c /= s->groups;
+#if OUTPUT_LAYER_MAP
+                    printf("%31d/%d -> %4d x%4d x%4d", 1, s->groups, s->out_w, s->out_h, s->out_c);
+#endif
+
+                    s->layer_type = "Crop";
+                    s->param.push_back(format("2=%d", s->out_c * s->group_id));
+                    s->param.push_back(format("3=%d", s->out_w));
+                    s->param.push_back(format("4=%d", s->out_h));
+                    s->param.push_back(format("5=%d", s->out_c));
+                }
+            }
+            else
+            {
+                s->layer_type = "Concat";
+            }
 #if OUTPUT_LAYER_MAP
             printf("\n");
 #endif
-
-            if (s->input_blobs.size() == 1)
-                s->layer_type = "Noop";
-            else
-                s->layer_type = "Concat";
         }
         else if (s->name == "upsample")
         {
@@ -719,7 +751,7 @@ void parse_cfg(std::deque<Section*>& dnet, int merge_output)
             if (s->anchors.size() != p->anchors.size())
                 error("yolo layer anchor count not match, output cannot be merged.");
 
-            for (int i = 0; i < s->anchors.size(); i++)
+            for (size_t i = 0; i < s->anchors.size(); i++)
                 if (s->anchors[i] != p->anchors[i])
                     error("yolo anchor size not match, output cannot be merged.");
 
@@ -769,18 +801,18 @@ void load_weights(const char* filename, std::deque<Section*>& dnet)
 
     int major, minor, revision;
 
-    fread(&major, sizeof(int), 1, fp);
-    fread(&minor, sizeof(int), 1, fp);
-    fread(&revision, sizeof(int), 1, fp);
+    fread_or_error(&major, sizeof(int), 1, fp, filename);
+    fread_or_error(&minor, sizeof(int), 1, fp, filename);
+    fread_or_error(&revision, sizeof(int), 1, fp, filename);
     if ((major * 10 + minor) >= 2)
     {
         uint64_t iseen = 0;
-        fread(&iseen, sizeof(uint64_t), 1, fp);
+        fread_or_error(&iseen, sizeof(uint64_t), 1, fp, filename);
     }
     else
     {
         uint32_t iseen = 0;
-        fread(&iseen, sizeof(uint32_t), 1, fp);
+        fread_or_error(&iseen, sizeof(uint32_t), 1, fp, filename);
     }
 
     for (auto s : dnet)
@@ -796,7 +828,7 @@ void load_weights(const char* filename, std::deque<Section*>& dnet)
             }
 
             if (s->layer_type == "Convolution")
-                read_to(s->weights, s->c * s->filters * s->size * s->size, fp);
+                read_to(s->weights, (size_t)(s->c) * s->filters * s->size * s->size, fp);
             else if (s->layer_type == "ConvolutionDepthWise")
                 read_to(s->weights, s->c * s->filters * s->size * s->size / s->groups, fp);
         }

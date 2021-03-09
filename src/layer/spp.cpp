@@ -14,12 +14,9 @@
 
 #include "spp.h"
 
-#include <algorithm>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(SPP)
 
 SPP::SPP()
 {

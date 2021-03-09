@@ -16,11 +16,7 @@
 
 #include "layer_shader_type.h"
 
-#include <algorithm>
-
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(HardSigmoid_vulkan)
 
 HardSigmoid_vulkan::HardSigmoid_vulkan()
 {

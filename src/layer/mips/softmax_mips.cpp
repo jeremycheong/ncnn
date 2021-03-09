@@ -17,22 +17,21 @@
 #include <float.h>
 #include <math.h>
 
-#if __MIPS_MSA
+#if __mips_msa
 #include "mips_mathfun.h"
 
 #include <msa.h>
-#endif // __MIPS_MSA
+#endif // __mips_msa
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(Softmax_mips)
 
 int Softmax_mips::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
 {
     int dims = bottom_top_blob.dims;
     size_t elemsize = bottom_top_blob.elemsize;
+    int positive_axis = axis < 0 ? dims + axis : axis;
 
-    if (dims != 3 || axis != 0)
+    if (dims != 3 || positive_axis != 0)
         return Softmax::forward_inplace(bottom_top_blob, opt);
 
     // value = exp( value - global max value )
@@ -66,14 +65,14 @@ int Softmax_mips::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
         float* ptr = bottom_top_blob.channel(q);
         float* maxptr = max;
 
-#if __MIPS_MSA
+#if __mips_msa
         int nn = size >> 2;
         int remain = size - (nn << 2);
 #else
         int remain = size;
-#endif // __MIPS_MSA
+#endif // __mips_msa
 
-#if __MIPS_MSA
+#if __mips_msa
         for (; nn > 0; nn--)
         {
             v4f32 _p = (v4f32)__msa_ld_w(ptr, 0);
@@ -86,7 +85,7 @@ int Softmax_mips::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
             ptr += 4;
             maxptr += 4;
         }
-#endif // __MIPS_MSA
+#endif // __mips_msa
 
         for (; remain > 0; remain--)
         {
@@ -107,14 +106,14 @@ int Softmax_mips::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
         float* ptr = bottom_top_blob.channel(q);
         float* sumptr = sum;
 
-#if __MIPS_MSA
+#if __mips_msa
         int nn = size >> 2;
         int remain = size - (nn << 2);
 #else
         int remain = size;
-#endif // __MIPS_MSA
+#endif // __mips_msa
 
-#if __MIPS_MSA
+#if __mips_msa
         for (; nn > 0; nn--)
         {
             v4f32 _p = (v4f32)__msa_ld_w(ptr, 0);
@@ -125,7 +124,7 @@ int Softmax_mips::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
             ptr += 4;
             sumptr += 4;
         }
-#endif // __MIPS_MSA
+#endif // __mips_msa
 
         for (; remain > 0; remain--)
         {
@@ -142,14 +141,14 @@ int Softmax_mips::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
         float* ptr = bottom_top_blob.channel(q);
         float* sumptr = sum;
 
-#if __MIPS_MSA
+#if __mips_msa
         int nn = size >> 2;
         int remain = size - (nn << 2);
 #else
         int remain = size;
-#endif // __MIPS_MSA
+#endif // __mips_msa
 
-#if __MIPS_MSA
+#if __mips_msa
         for (; nn > 0; nn--)
         {
             v4f32 _p = (v4f32)__msa_ld_w(ptr, 0);
@@ -160,7 +159,7 @@ int Softmax_mips::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
             ptr += 4;
             sumptr += 4;
         }
-#endif // __MIPS_MSA
+#endif // __mips_msa
 
         for (; remain > 0; remain--)
         {

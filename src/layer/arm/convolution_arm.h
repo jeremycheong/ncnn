@@ -30,6 +30,11 @@ public:
     virtual int forward(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const;
 
 protected:
+#if __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+    int create_pipeline_fp16s(const Option& opt);
+    int forward_fp16s(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const;
+    int forward_fp16sa(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const;
+#endif
     int create_pipeline_bf16s(const Option& opt);
     int forward_bf16s(const Mat& bottom_blob, Mat& top_blob, const Option& opt) const;
     int create_pipeline_int8_arm(const Option& opt);
@@ -41,7 +46,6 @@ public:
     bool use_winograd3x3;
     bool use_sgemm1x1;
     Mat weight_3x3_winograd64_data;
-    Mat weight_1x1_sgemm_data;
     Mat weight_3x3s2_data;
     Mat weight_sgemm_data;
 
@@ -53,10 +57,14 @@ public:
     Mat weight_data_pack1to4;
     Mat weight_data_pack4to1;
 
+    Mat weight_3x3_winograd42_data_pack4;
+    Mat weight_sgemm_data_pack4;
+
+    // fp16
+    Mat weight_data_fp16;
+    Mat bias_data_fp16;
+
     // bf16
-    Mat weight_data_pack4_bf16;
-    Mat weight_data_pack1to4_bf16;
-    Mat weight_data_pack4to1_bf16;
     Mat weight_data_bf16;
 
     // int8

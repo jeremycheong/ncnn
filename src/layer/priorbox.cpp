@@ -14,12 +14,9 @@
 
 #include "priorbox.h"
 
-#include <algorithm>
 #include <math.h>
 
 namespace ncnn {
-
-DEFINE_LAYER_CREATOR(PriorBox)
 
 PriorBox::PriorBox()
 {

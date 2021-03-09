@@ -24,9 +24,11 @@
 #include <math.h>
 
 #if NCNN_VULKAN
+#if NCNN_PLATFORM_API
 #if __ANDROID_API__ >= 26
 #include <android/hardware_buffer.h>
 #endif // __ANDROID_API__ >= 26
+#endif // NCNN_PLATFORM_API
 #endif // NCNN_VULKAN
 
 namespace ncnn {
@@ -179,6 +181,7 @@ Mat Mat::from_float16(const unsigned short* data, int size)
 }
 
 #if NCNN_VULKAN
+#if NCNN_PLATFORM_API
 #if __ANDROID_API__ >= 26
 VkImageMat VkImageMat::from_android_hardware_buffer(VkAndroidHardwareBufferImageAllocator* allocator)
 {
@@ -188,6 +191,7 @@ VkImageMat VkImageMat::from_android_hardware_buffer(VkAndroidHardwareBufferImage
     return VkImageMat(width, height, allocator);
 }
 #endif // __ANDROID_API__ >= 26
+#endif // NCNN_PLATFORM_API
 #endif // NCNN_VULKAN
 
 unsigned short float32_to_float16(float value)
@@ -355,6 +359,26 @@ void copy_cut_border(const Mat& src, Mat& dst, int top, int bottom, int left, in
     delete crop;
 }
 
+void resize_nearest(const Mat& src, Mat& dst, int w, int h, const Option& opt)
+{
+    Layer* interp = create_layer(LayerType::Interp);
+
+    ParamDict pd;
+    pd.set(0, 1);
+    pd.set(3, h);
+    pd.set(4, w);
+
+    interp->load_param(pd);
+
+    interp->create_pipeline(opt);
+
+    interp->forward(src, dst, opt);
+
+    interp->destroy_pipeline(opt);
+
+    delete interp;
+}
+
 void resize_bilinear(const Mat& src, Mat& dst, int w, int h, const Option& opt)
 {
     Layer* interp = create_layer(LayerType::Interp);
@@ -411,6 +435,23 @@ void convert_packing(const Mat& src, Mat& dst, int _elempack, const Option& opt)
     packing->destroy_pipeline(opt);
 
     delete packing;
+}
+
+void flatten(const Mat& src, Mat& dst, const Option& opt)
+{
+    Layer* flatten = create_layer(LayerType::Flatten);
+
+    ParamDict pd;
+
+    flatten->load_param(pd);
+
+    flatten->create_pipeline(opt);
+
+    flatten->forward(src, dst, opt);
+
+    flatten->destroy_pipeline(opt);
+
+    delete flatten;
 }
 
 void cast_float32_to_float16(const Mat& src, Mat& dst, const Option& opt)
